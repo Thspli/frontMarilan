@@ -183,9 +183,9 @@ export class APIClient {
   /**
    * Listar ferramentas de um colaborador
    */
-  async listarMinhasFerramentas(cracha: string): Promise<Ferramenta[]> {
+  async listarMinhasFerramentas(): Promise<Ferramenta[]> {
     try {
-      const response = await this.api.get<Ferramenta[]>(`/colaborador/${cracha}/ferramentas`);
+      const response = await this.api.get<Ferramenta[]>(`/ferramentas`);
       return response.data;
     } catch (error) {
       throw new Error(this.extractErrorMessage(error));

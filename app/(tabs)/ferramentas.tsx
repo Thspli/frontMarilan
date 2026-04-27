@@ -58,7 +58,7 @@ interface Ferramenta {
   alocadoPara?: string;
 }
 
-type ModalStep = 'nfc' | 'waiting_approval' | 'receiver_view';
+type ModalStep = 'swap' | 'waiting_approval' | 'receiver_view';
 
 // ─── Toast Component ──────────────────────────────────────────────────────────
 function Toast({ message, visible }: { message: string; visible: boolean }) {
@@ -168,16 +168,20 @@ interface SwapModalProps {
 }
 
 function SwapModal({ visible, tool, onClose, onSuccess }: SwapModalProps) {
-  const [step, setStep] = useState<ModalStep>('nfc');
+  const [step, setStep] = useState<ModalStep>('swap');
   const [isLoading, setIsLoading] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(true);
+  const [manualCracha, setManualCracha] = useState('');
+  const [manualObservacao, setManualObservacao] = useState('');
   const slideAnim = useRef(new Animated.Value(300)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
-      setStep('nfc');
+      setStep('swap');
       setIsLoading(false);
+      setManualCracha('');
+      setManualObservacao('');
       checkNFCSupport();
       startNFCReading();
       
@@ -205,7 +209,7 @@ function SwapModal({ visible, tool, onClose, onSuccess }: SwapModalProps) {
         // Simular espera por aprovação e então prosseguir para troca
         setStep('waiting_approval');
         setTimeout(() => {
-          handleSwap();
+          handleManualSwap();
         }, 2000);
       } else {
         console.log('NFC read cancelled or failed');
@@ -215,26 +219,25 @@ function SwapModal({ visible, tool, onClose, onSuccess }: SwapModalProps) {
     }
   };
 
-  const handleSwap = async () => {
-    if (!tool) return;
+  const handleManualSwap = async () => {
+    if (!tool || !manualCracha.trim()) return;
     
     try {
       setIsLoading(true);
       const userCracha = await AsyncStorage.getItem('userCracha');
-      const almoxarifeCracha = await AsyncStorage.getItem('userCracha'); // Em um caso real, seria outro crachá
       
-      if (!userCracha || !almoxarifeCracha) {
+      if (!userCracha) {
         throw new Error('Dados de usuário não encontrados');
       }
 
       const response = await apiClient.trocar({
-        cracha_novo_colaborador: userCracha,
+        cracha_novo_colaborador: manualCracha.trim(),
         ferramentas: [
           {
             codigo: tool.codigo,
             qtd: 1,
             checklist: 'REALIZADO',
-            observacao: 'Troca via NFC',
+            observacao: manualObservacao.trim() || 'Troca manual',
           },
         ],
       });
@@ -287,17 +290,56 @@ function SwapModal({ visible, tool, onClose, onSuccess }: SwapModalProps) {
 
           <View style={modalStyles.divider} />
 
-          {step === 'nfc' && (
+          {step === 'swap' && (
             <View style={modalStyles.stepContainer}>
-              <NfcPulseIcon />
-              <Text style={modalStyles.stepTitle}>Aproxime o dispositivo</Text>
-              <Text style={modalStyles.stepSubtitle}>Aguardando aproximação NFC{'\n'}à ferramenta ou ao crachá do almoxarife...</Text>
-              
-              {!nfcSupported && (
-                <TouchableOpacity style={modalStyles.manualBtn} onPress={handleSwap} activeOpacity={0.7}>
-                  <Text style={modalStyles.manualBtnText}>Não possui NFC? Prosseguir Manualmente</Text>
-                </TouchableOpacity>
-              )}
+              <View style={modalStyles.swapHeader}>
+                <NfcPulseIcon />
+                <View style={modalStyles.swapText}>
+                  <Text style={modalStyles.stepTitle}>Troca de Ferramenta</Text>
+                  <Text style={modalStyles.stepSubtitle}>Aproxime o dispositivo NFC ou{'\n'}preencha os dados manualmente</Text>
+                </View>
+              </View>
+
+              <View style={modalStyles.swapForm}>
+                <View style={modalStyles.inputGroup}>
+                  <Text style={modalStyles.inputLabel}>Crachá do Novo Colaborador</Text>
+                  <TextInput
+                    style={modalStyles.input}
+                    placeholder="Digite o número do crachá..."
+                    placeholderTextColor={C.gray400}
+                    value={manualCracha}
+                    onChangeText={setManualCracha}
+                    keyboardType="numeric"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                <View style={modalStyles.inputGroup}>
+                  <Text style={modalStyles.inputLabel}>Observação (opcional)</Text>
+                  <TextInput
+                    style={[modalStyles.input, modalStyles.inputMultiline]}
+                    placeholder="Ex: Troca por manutenção..."
+                    placeholderTextColor={C.gray400}
+                    value={manualObservacao}
+                    onChangeText={setManualObservacao}
+                    multiline
+                    numberOfLines={2}
+                    autoCapitalize="sentences"
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[modalStyles.confirmBtn, (!manualCracha.trim()) && modalStyles.confirmBtnDisabled]}
+                onPress={handleManualSwap}
+                activeOpacity={0.7}
+                disabled={!manualCracha.trim()}
+              >
+                <Text style={[modalStyles.confirmBtnText, (!manualCracha.trim()) && modalStyles.confirmBtnTextDisabled]}>
+                  Confirmar Troca
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -332,6 +374,18 @@ const modalStyles = StyleSheet.create({
   manualBtn: { marginTop: 20, paddingVertical: 8, paddingHorizontal: 16 },
   manualBtnText: { fontSize: 13, color: C.orange, fontWeight: '600', textDecorationLine: 'underline' },
   waitingIconBox: { width: 80, height: 80, borderRadius: 40, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
+  manualIconBox: { width: 80, height: 80, borderRadius: 40, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
+  swapHeader: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
+  swapText: { flex: 1 },
+  swapForm: { width: '100%', gap: 16, marginTop: 20 },
+  inputGroup: { gap: 6 },
+  inputLabel: { fontSize: 13, fontWeight: '600', color: C.gray700 },
+  input: { borderWidth: 1.5, borderColor: C.gray200, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: C.black, backgroundColor: C.white },
+  inputMultiline: { height: 60, textAlignVertical: 'top', paddingTop: 12 },
+  confirmBtn: { backgroundColor: C.orange, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 20 },
+  confirmBtnDisabled: { backgroundColor: C.gray200 },
+  confirmBtnText: { fontSize: 16, fontWeight: '700', color: C.white },
+  confirmBtnTextDisabled: { color: C.gray500 },
 });
 
 // ─── Icons ────────────────────────────────────────────────────────────────────

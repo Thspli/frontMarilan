@@ -1,26 +1,28 @@
 /**
- * app/(tabs)/almoxarifado.tsx
- * Tela de Almoxarifado / Retirada — Marilan
- *
- * Instalar se ainda não tiver: expo install react-native-nfc-manager
- * (o NFC real é mockado aqui — veja o bloco "NFC Mock")
+ * app/(tabs)/almoxarifado-new.tsx (Refactored)
+ * Tela de Almoxarifado / Retirada - Integração com API Real
+ * Gerenciado por: Almoxarife
  */
 
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  Modal,
-  Animated,
-  StatusBar,
-  Platform,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    FlatList,
+    Modal,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Path, Circle, Rect, Line } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { apiClient } from '../../services/api';
+import { nfcService } from '../../services/nfc';
 
 // ─── Theme ─────────────────────────────────────────────────────────────────────
 const C = {
@@ -28,7 +30,6 @@ const C = {
   orangeLight: '#FF8C42',
   orangeDark: '#C94E0F',
   orangeGhost: 'rgba(242,100,25,0.08)',
-
   white: '#FFFFFF',
   offWhite: '#F7F8FA',
   gray100: '#F0F1F3',
@@ -37,52 +38,27 @@ const C = {
   gray500: '#8A8F9E',
   gray700: '#4A4F5C',
   black: '#1A1C22',
-
   amber: '#F59E0B',
   amberBg: 'rgba(245,158,11,0.10)',
-  amberBorder: 'rgba(245,158,11,0.35)',
-
   green: '#27AE60',
   greenBg: 'rgba(39,174,96,0.10)',
-
-  blue: '#2563EB',
-  blueBg: 'rgba(37,99,235,0.08)',
-
-  overlay: 'rgba(26,28,34,0.72)',
 };
 
-// ─── Data ───────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 type ToolStatus = 'Disponível' | 'Em uso' | 'Em manutenção';
 
 interface Ferramenta {
-  id: string;
   codigo: string;
   nome: string;
-  status: ToolStatus;
   categoria: string;
+  status: ToolStatus;
 }
 
-const INITIAL_TOOLS: Ferramenta[] = [
-  { id: '1',  codigo: 'FRR-0001', nome: 'Furadeira de Impacto',   status: 'Disponível',    categoria: 'Elétrica'   },
-  { id: '4',  codigo: 'FRR-0004', nome: 'Parafusadeira Elétrica', status: 'Disponível',    categoria: 'Elétrica'   },
-  { id: '6',  codigo: 'FRR-0006', nome: 'Martelo Demolidor',      status: 'Disponível',    categoria: 'Impacto'    },
-  { id: '8',  codigo: 'FRR-0008', nome: 'Nível a Laser',          status: 'Disponível',    categoria: 'Medição'    },
-  { id: '10', codigo: 'FRR-0010', nome: 'Chave de Impacto',       status: 'Disponível',    categoria: 'Impacto'    },
-  { id: '12', codigo: 'FRR-0012', nome: 'Serra Tico-Tico',        status: 'Disponível',    categoria: 'Corte'      },
-  { id: '14', codigo: 'FRR-0014', nome: 'Fresadora Manual',       status: 'Disponível',    categoria: 'Corte'      },
-];
+interface ToolNoCarrinho extends Ferramenta {
+  qtd: number;
+}
 
-// ─── NFC Mock ──────────────────────────────────────────────────────────────────
-// Em produção, substitua por: import NfcManager, { NfcTech } from 'react-native-nfc-manager';
-const NfcMock = {
-  isSupported: async () => true,
-  start: async () => {},
-  requestTechnology: async () => {},
-  cancelTechnologyRequest: async () => {},
-  getTag: async () => ({ id: 'ALMOX-CARD-001', ndefMessage: [] }),
-};
-
-// ─── Icons ─────────────────────────────────────────────────────────────────────
+// ─── Icons ────────────────────────────────────────────────────────────────────
 const SearchIcon = ({ color = C.gray400 }: { color?: string }) => (
   <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
     <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={2} />
@@ -98,784 +74,546 @@ const ClearIcon = ({ color = C.gray400 }: { color?: string }) => (
 
 const ToolIcon = ({ color = C.orange, size = 20 }: { color?: string; size?: number }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path
-      d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
-      stroke={color}
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+    <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
-const ReturnIcon = ({ color = C.amber }: { color?: string }) => (
-  <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-    <Path d="M3 12h18M3 12l6-6M3 12l6 6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+const PlusIcon = ({ color = C.orange }: { color?: string }) => (
+  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+    <Path d="M12 5V19M5 12H19" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
-const PickupIcon = ({ color = C.white }: { color?: string }) => (
-  <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-    <Path d="M21 12H3m18 0l-6-6m6 6l-6 6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-  </Svg>
-);
-
-const NfcIcon = ({ color = C.white, size = 48 }: { color?: string; size?: number }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M20 12a8 8 0 0 1-8 8" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-    <Path d="M4 12a8 8 0 0 1 8-8" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-    <Path d="M17 12a5 5 0 0 1-5 5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-    <Path d="M7 12a5 5 0 0 1 5-5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-    <Circle cx={12} cy={12} r={2} fill={color} />
-  </Svg>
-);
-
-const UserBadgeIcon = ({ color = C.orange }: { color?: string }) => (
+const TrashIcon = ({ color = C.orange }: { color?: string }) => (
   <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-    <Rect x={3} y={3} width={18} height={18} rx={4} stroke={color} strokeWidth={1.8} />
-    <Circle cx={12} cy={9} r={3} stroke={color} strokeWidth={1.8} />
-    <Path d="M6 20c0-3.314 2.686-5 6-5s6 1.686 6 5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    <Path d="M3 6H5H21M8 6V4C8 3.4 8.4 3 9 3H15C15.6 3 16 3.4 16 4V6M19 6V20C19 21.1 18.1 22 17 22H7C5.9 22 5 21.1 5 20V6H19Z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
-// ─── NFC Pulse Animation ───────────────────────────────────────────────────────
-function NfcPulse() {
-  const pulse1 = useRef(new Animated.Value(0)).current;
-  const pulse2 = useRef(new Animated.Value(0)).current;
-  const pulse3 = useRef(new Animated.Value(0)).current;
+// ─── Toast Component ──────────────────────────────────────────────────────────
+function Toast({ message, visible }: { message: string; visible: boolean }) {
+  const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const createAnim = (val: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(val, { toValue: 1, duration: 1500, useNativeDriver: true }),
-          Animated.timing(val, { toValue: 0, duration: 0, useNativeDriver: true }),
-        ])
-      );
-
-    const a1 = createAnim(pulse1, 0);
-    const a2 = createAnim(pulse2, 400);
-    const a3 = createAnim(pulse3, 800);
-    a1.start(); a2.start(); a3.start();
-    return () => { a1.stop(); a2.stop(); a3.stop(); };
-  }, []);
-
-  const ringStyle = (val: Animated.Value) => ({
-    scale: val.interpolate({ inputRange: [0, 1], outputRange: [0.6, 2.0] }),
-    opacity: val.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.8, 0.4, 0] }),
-  });
-
-  const makeRingStyle = (val: Animated.Value) => {
-    const s = ringStyle(val);
-    return {
-      transform: [{ scale: s.scale }],
-      opacity: s.opacity,
-    };
-  };
+    if (visible) {
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.delay(2200),
+        Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible]);
 
   return (
-    <View style={styles.nfcPulseContainer}>
-      {[pulse1, pulse2, pulse3].map((p, i) => (
-        <Animated.View key={i} style={[styles.nfcRing, makeRingStyle(p)]} />
-      ))}
-      <View style={styles.nfcIconCircle}>
-        <NfcIcon size={36} color={C.white} />
-      </View>
-    </View>
+    <Animated.View style={[toastStyles.container, { opacity }]} pointerEvents="none">
+      <Text style={toastStyles.icon}>✅</Text>
+      <Text style={toastStyles.text}>{message}</Text>
+    </Animated.View>
   );
 }
 
-// ─── Authorization Modal ───────────────────────────────────────────────────────
-type ModalAction = 'retirar' | 'devolver';
+const toastStyles = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    bottom: 40,
+    left: 24,
+    right: 24,
+    backgroundColor: C.black,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    zIndex: 9999,
+  },
+  icon: { fontSize: 20 },
+  text: { color: C.white, fontSize: 14, fontWeight: '600', flex: 1 },
+});
 
-interface AuthModalProps {
+// ─── NFC Reading Modal ────────────────────────────────────────────────────────
+interface NFCModalProps {
   visible: boolean;
-  action: ModalAction;
-  tool: Ferramenta | null;
-  onSuccess: () => void;
-  onCancel: () => void;
+  loading: boolean;
+  lastTagRead: string | null;
+  onClose: () => void;
+  onAddTool: (codigo: string) => void;
 }
 
-function AuthModal({ visible, action, tool, onSuccess, onCancel }: AuthModalProps) {
-  const [nfcStatus, setNfcStatus] = useState<'waiting' | 'reading' | 'success' | 'error'>('waiting');
-  const [showManual, setShowManual] = useState(false);
+function NFCReadingModal({ visible, loading, lastTagRead, onClose, onAddTool }: NFCModalProps) {
   const slideAnim = useRef(new Animated.Value(300)).current;
-  const successScale = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  // Abre NFC listener ao montar
   useEffect(() => {
-    if (!visible) {
-      setNfcStatus('waiting');
-      setShowManual(false);
+    if (visible) {
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: 0, duration: 380, useNativeDriver: true }),
+        Animated.timing(fadeAnim, { toValue: 1, duration: 280, useNativeDriver: true }),
+      ]).start();
+    } else {
       slideAnim.setValue(300);
-      successScale.setValue(0);
-      return;
+      fadeAnim.setValue(0);
     }
-
-    Animated.spring(slideAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      damping: 20,
-      stiffness: 200,
-    }).start();
-
-    // Inicia o listener NFC
-    startNfc();
-
-    // Fallback: mostra "Assinatura Manual" após 8s
-    const fallbackTimer = setTimeout(() => setShowManual(true), 8000);
-    return () => clearTimeout(fallbackTimer);
   }, [visible]);
 
-  const startNfc = async () => {
-    try {
-      const supported = await NfcMock.isSupported();
-      if (!supported) { setShowManual(true); return; }
-      await NfcMock.start();
-      setNfcStatus('reading');
-      await NfcMock.requestTechnology();
-      // Mock: simula leitura com delay
-    } catch {
-      setShowManual(true);
-    }
-  };
-
-  const handleValidate = () => {
-    setNfcStatus('success');
-    Animated.spring(successScale, {
-      toValue: 1,
-      useNativeDriver: true,
-      damping: 12,
-      stiffness: 180,
-    }).start(() => {
-      setTimeout(onSuccess, 700);
+  const handleClose = () => {
+    Animated.parallel([
+      Animated.timing(slideAnim, { toValue: 300, duration: 280, useNativeDriver: true }),
+      Animated.timing(fadeAnim, { toValue: 0, duration: 220, useNativeDriver: true }),
+    ]).start(() => {
+      onClose();
+      nfcService.stop();
     });
   };
 
-  const isSuccess = nfcStatus === 'success';
+  const handleAdd = () => {
+    if (lastTagRead) {
+      onAddTool(lastTagRead);
+      handleClose();
+    }
+  };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
-      <View style={styles.modalOverlay}>
-        <Animated.View style={[styles.modalSheet, { transform: [{ translateY: slideAnim }] }]}>
+    <Modal transparent visible={visible} animationType="none" onRequestClose={handleClose}>
+      <Animated.View style={[nfcModalStyles.overlay, { opacity: fadeAnim }]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
 
-          {/* Handle */}
-          <View style={styles.modalHandle} />
+        <Animated.View style={[nfcModalStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+          <View style={nfcModalStyles.handle} />
 
-          {/* Top accent */}
-          <View style={[styles.modalAccent, { backgroundColor: action === 'retirar' ? C.orange : C.amber }]} />
-
-          {/* Tool info pill */}
-          {tool && (
-            <View style={styles.modalToolPill}>
-              <ToolIcon color={action === 'retirar' ? C.orange : C.amber} size={16} />
-              <Text style={styles.modalToolCode}>{tool.codigo}</Text>
-              <View style={styles.modalToolDivider} />
-              <Text style={styles.modalToolName} numberOfLines={1}>{tool.nome}</Text>
-            </View>
-          )}
-
-          {/* Action label */}
-          <View style={[styles.modalActionBadge, {
-            backgroundColor: action === 'retirar' ? C.orangeGhost : C.amberBg,
-          }]}>
-            <Text style={[styles.modalActionText, {
-              color: action === 'retirar' ? C.orange : C.amber,
-            }]}>
-              {action === 'retirar' ? '↓  RETIRADA' : '↑  DEVOLUÇÃO'}
-            </Text>
-          </View>
-
-          {/* NFC area */}
-          {!isSuccess ? (
-            <>
-              <Text style={styles.modalTitle}>Aguardando Aprovação{'\n'}do Almoxarife</Text>
-              <Text style={styles.modalSubtitle}>
-                Aproxime o cartão do responsável{'\n'}ou dispositivo NFC
-              </Text>
-
-              <NfcPulse />
-
-              {/* Botão de teste (simula NFC aprovado) */}
-              <TouchableOpacity
-                style={[styles.testButton, { backgroundColor: action === 'retirar' ? C.orange : C.amber }]}
-                onPress={handleValidate}
-                activeOpacity={0.85}>
-                <UserBadgeIcon color={C.white} />
-                <Text style={styles.testButtonText}>Simular Leitura NFC</Text>
+          <View style={nfcModalStyles.content}>
+            <View style={nfcModalStyles.header}>
+              <Text style={nfcModalStyles.title}>Ler Ferramenta (NFC)</Text>
+              <TouchableOpacity onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                  <Path d="M18 6L6 18M6 6l12 12" stroke={C.gray500} strokeWidth={2} strokeLinecap="round" />
+                </Svg>
               </TouchableOpacity>
+            </View>
 
-              {/* Assinatura manual (fallback) */}
-              {showManual && (
-                <TouchableOpacity style={styles.manualLink} onPress={handleValidate}>
-                  <Text style={styles.manualLinkText}>Assinatura Manual do Almoxarife</Text>
+            {loading ? (
+              <>
+                <View style={nfcModalStyles.iconBox}>
+                  <ActivityIndicator size="large" color={C.orange} />
+                </View>
+                <Text style={nfcModalStyles.subtitle}>Aproxime o telefone da ferramenta ou crachá...</Text>
+              </>
+            ) : lastTagRead ? (
+              <>
+                <View style={[nfcModalStyles.iconBox, { backgroundColor: C.greenBg }]}>
+                  <Svg width={40} height={40} viewBox="0 0 24 24" fill="none">
+                    <Path d="M20 6L9 17L4 12" stroke={C.green} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+                  </Svg>
+                </View>
+                <Text style={nfcModalStyles.subtitle}>Ferramenta Lida!</Text>
+                <Text style={nfcModalStyles.codeDisplay}>{lastTagRead}</Text>
+
+                <TouchableOpacity style={nfcModalStyles.addBtn} onPress={handleAdd} activeOpacity={0.8}>
+                  <PlusIcon />
+                  <Text style={nfcModalStyles.addBtnText}>Adicionar ao Carrinho</Text>
                 </TouchableOpacity>
-              )}
-
-              {/* Cancelar */}
-              <TouchableOpacity style={styles.cancelBtn} onPress={onCancel} activeOpacity={0.7}>
-                <Text style={styles.cancelBtnText}>Cancelar</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <View style={styles.successContainer}>
-              <Animated.View style={[styles.successCircle, { transform: [{ scale: successScale }] }]}>
-                <Text style={styles.successCheck}>✓</Text>
-              </Animated.View>
-              <Text style={styles.successTitle}>
-                {action === 'retirar' ? 'Retirada Aprovada!' : 'Devolução Aprovada!'}
-              </Text>
-              <Text style={styles.successSub}>Autorizado pelo Almoxarife</Text>
-            </View>
-          )}
+              </>
+            ) : null}
+          </View>
         </Animated.View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
 
-// ─── "Comigo" Card ─────────────────────────────────────────────────────────────
-function ComigoBanner({ tool, onReturn }: { tool: Ferramenta | null; onReturn: () => void }) {
-  const anim = useRef(new Animated.Value(tool ? 1 : 0)).current;
+const nfcModalStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: C.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 30 },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: C.gray200, alignSelf: 'center', marginTop: 12, marginBottom: 12 },
+  content: { paddingHorizontal: 24, paddingVertical: 20, alignItems: 'center', minHeight: 280 },
+  header: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  title: { fontSize: 18, fontWeight: '700', color: C.black },
+  iconBox: { width: 100, height: 100, borderRadius: 50, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center', marginVertical: 20 },
+  subtitle: { fontSize: 16, fontWeight: '600', color: C.gray700, textAlign: 'center', marginTop: 12 },
+  codeDisplay: { fontSize: 18, fontWeight: '700', color: C.orange, marginTop: 16, marginBottom: 20, letterSpacing: 1 },
+  addBtn: { width: '100%', height: 48, backgroundColor: C.orange, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16 },
+  addBtnText: { fontSize: 15, fontWeight: '700', color: C.white },
+});
+
+// ─── Tool Card for Carrinho ───────────────────────────────────────────────────
+interface ToolCarrinhoCardProps {
+  item: ToolNoCarrinho;
+  onRemove: (codigo: string) => void;
+  onChangeQty: (codigo: string, qty: number) => void;
+}
+
+function ToolCarrinhoCard({ item, onRemove, onChangeQty }: ToolCarrinhoCardProps) {
+  return (
+    <View style={carrinhoCardStyles.card}>
+      <View style={carrinhoCardStyles.left}>
+        <View style={carrinhoCardStyles.iconBox}>
+          <ToolIcon />
+        </View>
+      </View>
+
+      <View style={carrinhoCardStyles.middle}>
+        <Text style={carrinhoCardStyles.toolName}>{item.nome}</Text>
+        <View style={carrinhoCardStyles.metaRow}>
+          <Text style={carrinhoCardStyles.metaLabel}>CÓD: {item.codigo}</Text>
+          <Text style={carrinhoCardStyles.metaLabel}>·  {item.categoria}</Text>
+        </View>
+      </View>
+
+      <View style={carrinhoCardStyles.right}>
+        <View style={carrinhoCardStyles.qtyControl}>
+          <TouchableOpacity onPress={() => onChangeQty(item.codigo, Math.max(1, item.qtd - 1))} style={carrinhoCardStyles.qtyBtn} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+            <Text style={carrinhoCardStyles.qtyBtnText}>−</Text>
+          </TouchableOpacity>
+          <Text style={carrinhoCardStyles.qtyValue}>{item.qtd}</Text>
+          <TouchableOpacity onPress={() => onChangeQty(item.codigo, item.qtd + 1)} style={carrinhoCardStyles.qtyBtn} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+            <Text style={carrinhoCardStyles.qtyBtnText}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity onPress={() => onRemove(item.codigo)} style={carrinhoCardStyles.deleteBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TrashIcon color={C.orange} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const carrinhoCardStyles = StyleSheet.create({
+  card: { backgroundColor: C.white, borderRadius: 12, padding: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  left: {},
+  iconBox: { width: 40, height: 40, borderRadius: 10, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
+  middle: { flex: 1 },
+  toolName: { fontSize: 13, fontWeight: '700', color: C.black },
+  metaRow: { flexDirection: 'row', marginTop: 4 },
+  metaLabel: { fontSize: 11, color: C.gray500 },
+  right: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  qtyControl: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.gray100, borderRadius: 8, paddingHorizontal: 4, gap: 4 },
+  qtyBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  qtyBtnText: { fontSize: 14, fontWeight: '700', color: C.orange },
+  qtyValue: { fontSize: 12, fontWeight: '700', color: C.black, minWidth: 20, textAlign: 'center' },
+  deleteBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
+});
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+export default function AlmoxarifadoScreen() {
+  const [ferramentasDisp, setFerramentasDisp] = useState<Ferramenta[]>([]);
+  const [carrinho, setCarrinho] = useState<ToolNoCarrinho[]>([]);
+  const [query, setQuery] = useState('');
+  const [nfcModalVisible, setNfcModalVisible] = useState(false);
+  const [nfcLoading, setNfcLoading] = useState(false);
+  const [lastTagRead, setLastTagRead] = useState<string | null>(null);
+  const [toast, setToast] = useState({ visible: false, message: '' });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [userCracha, setUserCracha] = useState<string | null>(null);
+  const [codigoManu, setCodigoManu] = useState('');
 
   useEffect(() => {
-    Animated.spring(anim, {
-      toValue: tool ? 1 : 0,
-      useNativeDriver: true,
-      damping: 18,
-      stiffness: 160,
-    }).start();
-  }, [tool]);
-
-  return (
-    <View style={styles.comigoSection}>
-      <View style={styles.comigoHeader}>
-        <Text style={styles.comigoSectionLabel}>COMIGO AGORA</Text>
-        {tool && (
-          <View style={styles.comigoActiveDot} />
-        )}
-      </View>
-
-      {tool ? (
-        <Animated.View style={[styles.comigoCard, { transform: [{ scale: anim }], opacity: anim }]}>
-          <View style={styles.comigoCardLeft}>
-            <View style={styles.comigoIconBox}>
-              <ToolIcon color={C.amber} size={22} />
-            </View>
-          </View>
-          <View style={styles.comigoCardBody}>
-            <Text style={styles.comigoToolName} numberOfLines={1}>{tool.nome}</Text>
-            <View style={styles.comigoMeta}>
-              <Text style={styles.comigoMetaText}>{tool.codigo}</Text>
-              <View style={styles.comigoMetaDot} />
-              <Text style={styles.comigoMetaText}>{tool.categoria}</Text>
-            </View>
-          </View>
-          <TouchableOpacity style={styles.returnBtn} onPress={onReturn} activeOpacity={0.8}>
-            <ReturnIcon color={C.amber} />
-            <Text style={styles.returnBtnText}>Devolver</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      ) : (
-        <View style={styles.comigoEmpty}>
-          <Text style={styles.comigoEmptyIcon}>🔧</Text>
-          <Text style={styles.comigoEmptyText}>Nenhuma ferramenta retirada</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-// ─── Available Tool Row ────────────────────────────────────────────────────────
-function AvailableToolCard({ item, onPickup, disabled }: {
-  item: Ferramenta;
-  onPickup: () => void;
-  disabled: boolean;
-}) {
-  return (
-    <View style={[styles.availCard, disabled && styles.availCardDisabled]}>
-      <View style={styles.availIconBox}>
-        <ToolIcon color={disabled ? C.gray400 : C.orange} size={18} />
-      </View>
-      <View style={styles.availBody}>
-        <Text style={[styles.availName, disabled && { color: C.gray400 }]} numberOfLines={1}>
-          {item.nome}
-        </Text>
-        <View style={styles.availMeta}>
-          <Text style={styles.availCode}>{item.codigo}</Text>
-          <View style={styles.availMetaDot} />
-          <Text style={styles.availCat}>{item.categoria}</Text>
-        </View>
-      </View>
-      <TouchableOpacity
-        style={[styles.pickupBtn, disabled && styles.pickupBtnDisabled]}
-        onPress={onPickup}
-        disabled={disabled}
-        activeOpacity={0.85}>
-        <PickupIcon color={disabled ? C.gray400 : C.white} />
-        <Text style={[styles.pickupBtnText, disabled && { color: C.gray400 }]}>Retirar</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-// ─── Main Screen ───────────────────────────────────────────────────────────────
-export default function AlmoxarifadoScreen() {
-  const [tools, setTools] = useState<Ferramenta[]>(INITIAL_TOOLS);
-  const [myTool, setMyTool] = useState<Ferramenta | null>(null);
-  const [query, setQuery] = useState('');
-
-  const [modalVisible, setModalVisible] = useState(false);
-  const [pendingAction, setPendingAction] = useState<ModalAction>('retirar');
-  const [pendingTool, setPendingTool] = useState<Ferramenta | null>(null);
-
-  const available = useMemo(() =>
-    tools.filter(t => {
-      const q = query.toLowerCase();
-      return (
-        !q ||
-        t.nome.toLowerCase().includes(q) ||
-        t.codigo.toLowerCase().includes(q) ||
-        t.categoria.toLowerCase().includes(q)
-      );
-    }),
-    [tools, query]
-  );
-
-  const openPickup = useCallback((tool: Ferramenta) => {
-    setPendingTool(tool);
-    setPendingAction('retirar');
-    setModalVisible(true);
+    loadFerramentas();
   }, []);
 
-  const openReturn = useCallback(() => {
-    if (!myTool) return;
-    setPendingTool(myTool);
-    setPendingAction('devolver');
-    setModalVisible(true);
-  }, [myTool]);
+  const loadFerramentas = async () => {
+    try {
+      setIsLoading(true);
+      const cracha = await AsyncStorage.getItem('userCracha');
+      setUserCracha(cracha);
 
-  const handleModalSuccess = useCallback(() => {
-    setModalVisible(false);
+      const data = await apiClient.listarFerramentas();
+      const disponiveis = data.filter(f => f.status === 'Disponível');
+      setFerramentasDisp(disponiveis || []);
+    } catch (error: any) {
+      Alert.alert('Erro', error.message || 'Erro ao carregar ferramentas');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    if (pendingAction === 'retirar' && pendingTool) {
-      // Remove da lista de disponíveis
-      setTools(prev => prev.filter(t => t.id !== pendingTool.id));
-      // Coloca no "Comigo"
-      setMyTool(pendingTool);
-    } else if (pendingAction === 'devolver' && myTool) {
-      // Volta para a lista de disponíveis
-      setTools(prev => [{ ...myTool, status: 'Disponível' }, ...prev]);
-      setMyTool(null);
+  const handleNFCModalOpen = async () => {
+    setNfcModalVisible(true);
+    setNfcLoading(true);
+    setLastTagRead(null);
+
+    try {
+      const result = await nfcService.readTag();
+      if (result.success && result.data) {
+        setLastTagRead(result.data);
+      } else {
+        showToast('Falha ao ler NFC');
+      }
+    } catch (error: any) {
+      console.error('NFC error:', error);
+    } finally {
+      setNfcLoading(false);
+    }
+  };
+
+  const handleAddToolToCarrinho = (codigo: string) => {
+    const existe = carrinho.find(t => t.codigo === codigo);
+    if (existe) {
+      handleChangeQty(codigo, existe.qtd + 1);
+    } else {
+      const ferramenta = ferramentasDisp.find(f => f.codigo === codigo);
+      if (ferramenta) {
+        setCarrinho([...carrinho, { ...ferramenta, qtd: 1 }]);
+      }
+    }
+  };
+
+  const handleAddToolByCode = () => {
+    if (codigoManu.trim()) {
+      handleAddToolToCarrinho(codigoManu.trim());
+      setCodigoManu('');
+      showToast('Ferramenta adicionada ao carrinho');
+    }
+  };
+
+  const handleRemoveTool = (codigo: string) => {
+    setCarrinho(carrinho.filter(t => t.codigo !== codigo));
+  };
+
+  const handleChangeQty = (codigo: string, qty: number) => {
+    setCarrinho(carrinho.map(t => (t.codigo === codigo ? { ...t, qtd: qty } : t)));
+  };
+
+  const handleSubmitCarrinho = async () => {
+    if (carrinho.length === 0) {
+      Alert.alert('Carrinho Vazio', 'Adicione ferramentas antes de confirmar');
+      return;
     }
 
-    setPendingTool(null);
-  }, [pendingAction, pendingTool, myTool]);
+    try {
+      setIsSubmitting(true);
+      const crachaManu = await AsyncStorage.getItem('userCracha');
+      if (!crachaManu) throw new Error('Crachá do almoxarife não encontrado');
 
-  const handleModalCancel = useCallback(() => {
-    setModalVisible(false);
-    setPendingTool(null);
-  }, []);
+      // Solicitar crachá do colaborador
+      Alert.prompt('Crachá do Colaborador', 'Digite o número do crachá do colaborador:', [
+        {
+          text: 'Cancelar',
+          onPress: () => setIsSubmitting(false),
+          style: 'cancel',
+        },
+        {
+          text: 'Confirmar',
+          onPress: async (crachColaborador: string | undefined) => {
+            if (!crachColaborador) {
+              setIsSubmitting(false);
+              return;
+            }
 
-  const hasMyTool = !!myTool;
+            try {
+              const response = await apiClient.retirar({
+                cracha_colaborador: crachColaborador,
+                ferramentas: carrinho.map(f => ({
+                  codigo: f.codigo,
+                  qtd: f.qtd,
+                  checklist: 'REALIZADO',
+                  observacao: 'Retirada via NFC',
+                })),
+              });
+
+              setCarrinho([]);
+              showToast(`✅ Retirada registrada com sucesso!`);
+              await loadFerramentas();
+            } catch (error: any) {
+              Alert.alert('Erro', error.message || 'Erro ao processar retirada');
+            } finally {
+              setIsSubmitting(false);
+            }
+          },
+        },
+      ]);
+    } catch (error: any) {
+      Alert.alert('Erro', error.message);
+      setIsSubmitting(false);
+    }
+  };
+
+  const showToast = (message: string) => {
+    setToast({ visible: true, message });
+    setTimeout(() => setToast({ visible: false, message: '' }), 3000);
+  };
+
+  const filtered = ferramentasDisp.filter(item => {
+    const q = query.toLowerCase();
+    return !q || item.nome.toLowerCase().includes(q) || item.codigo.toLowerCase().includes(q);
+  });
+
+  if (isLoading) {
+    return (
+      <View style={[styles.root, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={C.orange} />
+        <Text style={{ marginTop: 12, color: C.gray500 }}>Carregando ferramentas...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.orange} />
 
-      {/* ── Header ── */}
+      {/* Header */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
-          <View style={styles.circle1} />
-          <View style={styles.circle2} />
-          <View style={styles.headerContent}>
+          <View>
             <Text style={styles.headerTitle}>Almoxarifado</Text>
-            <Text style={styles.headerSub}>Retirada e Devolução de Ferramentas</Text>
+            <Text style={styles.headerSub}>Retirada de Ferramentas</Text>
           </View>
-          <View style={styles.statsRow}>
-            <View style={styles.statBox}>
-              <Text style={styles.statNumber}>{INITIAL_TOOLS.length}</Text>
-              <Text style={styles.statLabel}>Total</Text>
-            </View>
-            <View style={styles.statSep} />
-            <View style={styles.statBox}>
-              <Text style={styles.statNumber}>{tools.length}</Text>
+          <View style={styles.stats}>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>{ferramentasDisp.length}</Text>
               <Text style={styles.statLabel}>Disponíveis</Text>
             </View>
-            <View style={styles.statSep} />
-            <View style={styles.statBox}>
-              <Text style={styles.statNumber}>{hasMyTool ? 1 : 0}</Text>
-              <Text style={styles.statLabel}>Comigo</Text>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>{carrinho.length}</Text>
+              <Text style={styles.statLabel}>No Carrinho</Text>
             </View>
           </View>
         </View>
       </SafeAreaView>
 
-      {/* ── Body ── */}
+      {/* Body */}
       <View style={styles.body}>
-        {/* Comigo */}
-        <ComigoBanner tool={myTool} onReturn={openReturn} />
-
-        {/* Divider */}
-        <View style={styles.sectionDivider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerLabel}>FERRAMENTAS DISPONÍVEIS</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        {/* Search */}
-        <View style={styles.searchWrapper}>
-          <SearchIcon color={query ? C.orange : C.gray400} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Buscar por nome, código ou categoria…"
-            placeholderTextColor={C.gray400}
-            value={query}
-            onChangeText={setQuery}
-            autoCorrect={false}
-            autoCapitalize="none"
-            returnKeyType="search"
-          />
-          {query.length > 0 && (
-            <TouchableOpacity
-              onPress={() => setQuery('')}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <ClearIcon />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* List */}
-        <FlatList
-          data={available}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <AvailableToolCard
-              item={item}
-              onPickup={() => openPickup(item)}
-              disabled={hasMyTool}
-            />
-          )}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>📭</Text>
-              <Text style={styles.emptyTitle}>Nenhuma ferramenta disponível</Text>
-              <Text style={styles.emptyText}>
-                {query ? 'Tente outro termo de busca.' : 'Todas as ferramentas estão em uso.'}
-              </Text>
+        {carrinho.length > 0 && (
+          <View style={styles.carrinhoSection}>
+            <View style={styles.carrinhoHeader}>
+              <Text style={styles.carrinhoTitle}>Carrinho de Retirada ({carrinho.length})</Text>
+              {carrinho.length > 0 && (
+                <TouchableOpacity onPress={() => setCarrinho([])}>
+                  <Text style={styles.limparLink}>Limpar</Text>
+                </TouchableOpacity>
+              )}
             </View>
-          }
-        />
-
-        {/* Aviso quando já tem uma ferramenta */}
-        {hasMyTool && (
-          <View style={styles.limitBanner}>
-            <Text style={styles.limitBannerText}>
-              ⚠️  Devolva a ferramenta atual antes de retirar outra
-            </Text>
+            <FlatList
+              data={carrinho}
+              keyExtractor={item => item.codigo}
+              renderItem={({ item }) => <ToolCarrinhoCard item={item} onRemove={handleRemoveTool} onChangeQty={handleChangeQty} />}
+              scrollEnabled={false}
+            />
+            <TouchableOpacity style={styles.submitBtn} onPress={handleSubmitCarrinho} disabled={isSubmitting} activeOpacity={0.8}>
+              {isSubmitting ? <ActivityIndicator color={C.white} size="small" /> : <Text style={styles.submitBtnText}>Confirmar Retirada</Text>}
+            </TouchableOpacity>
           </View>
         )}
+
+        {/* Search & Add */}
+        <View style={styles.controlsSection}>
+          <Text style={styles.sectionTitle}>Adicionar Ferramentas</Text>
+          <View style={styles.searchWrapper}>
+            <SearchIcon color={query ? C.orange : C.gray400} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar ferramenta..."
+              placeholderTextColor={C.gray400}
+              value={query}
+              onChangeText={setQuery}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            {query.length > 0 && (
+              <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <ClearIcon />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.codeInput}
+              placeholder="Ou digite o código..."
+              placeholderTextColor={C.gray400}
+              value={codigoManu}
+              onChangeText={setCodigoManu}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity style={styles.codeBtn} onPress={handleAddToolByCode} activeOpacity={0.8}>
+              <Text style={styles.codeBtnText}>Adicionar</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={styles.nfcBtn} onPress={handleNFCModalOpen} activeOpacity={0.8}>
+            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+              <Path d="M20 2H4C2.9 2 2 2.9 2 4V20C2 21.1 2.9 22 4 22H20C21.1 22 22 21.1 22 20V4C22 2.9 21.1 2 20 2Z" stroke={C.white} strokeWidth={1.5} strokeLinecap="round" />
+              <Path d="M8.5 8.5C9.8 7.2 11.6 6.5 13.5 6.5" stroke={C.white} strokeWidth={1.8} strokeLinecap="round" />
+              <Path d="M6.5 6.5C8.3 4.7 10.8 3.5 13.5 3.5" stroke={C.white} strokeWidth={1.8} strokeLinecap="round" strokeOpacity={0.4} />
+            </Svg>
+            <Text style={styles.nfcBtnText}>Ler com NFC</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Ferramenta List */}
+        <View style={styles.listSection}>
+          <Text style={styles.sectionTitle}>Ferramentas Disponíveis ({filtered.length})</Text>
+          <FlatList
+            data={filtered}
+            keyExtractor={item => item.codigo}
+            renderItem={({ item }) => (
+              <TouchableOpacity style={styles.toolItem} onPress={() => handleAddToolToCarrinho(item.codigo)} activeOpacity={0.7}>
+                <View style={styles.toolItemIcon}>
+                  <ToolIcon />
+                </View>
+                <View style={styles.toolItemBody}>
+                  <Text style={styles.toolItemName}>{item.nome}</Text>
+                  <Text style={styles.toolItemCode}>{item.codigo}  ·  {item.categoria}</Text>
+                </View>
+                <PlusIcon />
+              </TouchableOpacity>
+            )}
+            scrollEnabled={false}
+            ListEmptyComponent={<Text style={styles.empty}>Nenhuma ferramenta encontrada</Text>}
+          />
+        </View>
       </View>
 
-      {/* ── Auth Modal ── */}
-      <AuthModal
-        visible={modalVisible}
-        action={pendingAction}
-        tool={pendingTool}
-        onSuccess={handleModalSuccess}
-        onCancel={handleModalCancel}
-      />
+      {/* NFC Modal */}
+      <NFCReadingModal visible={nfcModalVisible} loading={nfcLoading} lastTagRead={lastTagRead} onClose={() => setNfcModalVisible(false)} onAddTool={handleAddToolToCarrinho} />
+
+      {/* Toast */}
+      <Toast message={toast.message} visible={toast.visible} />
     </View>
   );
 }
 
-// ─── Styles ─────────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.orange },
   headerSafe: { backgroundColor: C.orange },
-  body: {
-    flex: 1,
-    backgroundColor: C.offWhite,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    overflow: 'hidden',
-    paddingTop: 8,
-  },
+  header: { paddingHorizontal: 24, paddingVertical: 16, gap: 16 },
+  headerTitle: { fontSize: 26, fontWeight: '800', color: C.white },
+  headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2, fontWeight: '500' },
+  stats: { flexDirection: 'row', gap: 12 },
+  stat: { flex: 1, backgroundColor: 'rgba(0,0,0,0.12)', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 12, alignItems: 'center' },
+  statValue: { fontSize: 20, fontWeight: '800', color: C.white },
+  statLabel: { fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontWeight: '500' },
 
-  // Header
-  header: {
-    backgroundColor: C.orange,
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 28,
-    overflow: 'hidden',
-  },
-  circle1: {
-    position: 'absolute', width: 180, height: 180, borderRadius: 90,
-    backgroundColor: C.orangeLight, opacity: 0.22, top: -50, right: -40,
-  },
-  circle2: {
-    position: 'absolute', width: 100, height: 100, borderRadius: 50,
-    backgroundColor: C.orangeDark, opacity: 0.18, top: 10, left: -20,
-  },
-  headerContent: { marginBottom: 20 },
-  headerTitle: { fontSize: 26, fontWeight: '800', color: C.white, letterSpacing: -0.3 },
-  headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.70)', marginTop: 2, fontWeight: '500' },
+  body: { flex: 1, backgroundColor: C.offWhite, borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' },
 
-  statsRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.12)',
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-  },
-  statBox: { flex: 1, alignItems: 'center' },
-  statNumber: { fontSize: 22, fontWeight: '800', color: C.white },
-  statLabel: { fontSize: 11, color: 'rgba(255,255,255,0.70)', marginTop: 2, fontWeight: '500', textAlign: 'center' },
-  statSep: { width: 1, backgroundColor: 'rgba(255,255,255,0.20)', marginVertical: 4 },
+  carrinhoSection: { backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.gray100, padding: 16 },
+  carrinhoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  carrinhoTitle: { fontSize: 14, fontWeight: '700', color: C.black },
+  limparLink: { fontSize: 12, color: C.orange, fontWeight: '600' },
+  submitBtn: { marginTop: 12, height: 48, backgroundColor: C.orange, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  submitBtnText: { fontSize: 15, fontWeight: '700', color: C.white },
 
-  // Comigo section
-  comigoSection: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  comigoHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  comigoSectionLabel: {
-    fontSize: 11, fontWeight: '700', color: C.gray500, letterSpacing: 1.2,
-  },
-  comigoActiveDot: {
-    width: 7, height: 7, borderRadius: 3.5, backgroundColor: C.amber,
-  },
-
-  comigoCard: {
-    backgroundColor: C.white,
-    borderRadius: 18,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1.5,
-    borderColor: C.amberBorder,
-    shadowColor: C.amber,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  comigoCardLeft: {},
-  comigoIconBox: {
-    width: 48, height: 48, borderRadius: 14,
-    backgroundColor: C.amberBg,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  comigoCardBody: { flex: 1, gap: 4 },
-  comigoToolName: { fontSize: 15, fontWeight: '700', color: C.black },
-  comigoMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  comigoMetaText: { fontSize: 12, color: C.gray500, fontWeight: '500' },
-  comigoMetaDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: C.gray400 },
-
-  returnBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: C.amberBg,
-    borderWidth: 1.5, borderColor: C.amberBorder,
-    borderRadius: 12,
-    paddingVertical: 8, paddingHorizontal: 12,
-  },
-  returnBtnText: { fontSize: 13, fontWeight: '700', color: C.amber },
-
-  comigoEmpty: {
-    backgroundColor: C.gray100,
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: C.gray200,
-    borderStyle: 'dashed',
-  },
-  comigoEmptyIcon: { fontSize: 24 },
-  comigoEmptyText: { fontSize: 13, color: C.gray500, fontWeight: '500' },
-
-  // Divider
-  sectionDivider: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, marginVertical: 4, gap: 10,
-  },
-  dividerLine: { flex: 1, height: 1, backgroundColor: C.gray200 },
-  dividerLabel: { fontSize: 11, fontWeight: '700', color: C.gray400, letterSpacing: 1.2 },
-
-  // Search
-  searchWrapper: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.white,
-    borderRadius: 14,
-    marginHorizontal: 16, marginTop: 8,
-    paddingHorizontal: 14, height: 46,
-    gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06, shadowRadius: 4,
-    elevation: 2,
-  },
+  controlsSection: { padding: 16, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.gray100, gap: 12 },
+  sectionTitle: { fontSize: 13, fontWeight: '700', color: C.gray700, letterSpacing: 0.3 },
+  searchWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.offWhite, borderRadius: 10, paddingHorizontal: 12, height: 44, gap: 8 },
   searchInput: { flex: 1, fontSize: 14, color: C.black, paddingVertical: 0 },
 
-  // Available card
-  listContent: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 90 },
+  inputRow: { flexDirection: 'row', gap: 8 },
+  codeInput: { flex: 1, backgroundColor: C.offWhite, borderRadius: 10, paddingHorizontal: 12, height: 44, fontSize: 14, color: C.black },
+  codeBtn: { backgroundColor: C.amber, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center' },
+  codeBtnText: { fontSize: 12, fontWeight: '700', color: C.black },
 
-  availCard: {
-    backgroundColor: C.white,
-    borderRadius: 14,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04, shadowRadius: 3,
-    elevation: 1,
-  },
-  availCardDisabled: { opacity: 0.5 },
-  availIconBox: {
-    width: 40, height: 40, borderRadius: 11,
-    backgroundColor: C.orangeGhost,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  availBody: { flex: 1, gap: 3 },
-  availName: { fontSize: 14, fontWeight: '700', color: C.black },
-  availMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  availCode: { fontSize: 11, color: C.gray500, fontWeight: '600' },
-  availMetaDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: C.gray400 },
-  availCat: { fontSize: 11, color: C.gray500 },
+  nfcBtn: { height: 48, backgroundColor: C.orange, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  nfcBtnText: { fontSize: 14, fontWeight: '700', color: C.white },
 
-  pickupBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: C.orange,
-    borderRadius: 10,
-    paddingVertical: 8, paddingHorizontal: 12,
-  },
-  pickupBtnDisabled: { backgroundColor: C.gray200 },
-  pickupBtnText: { fontSize: 13, fontWeight: '700', color: C.white },
-
-  // Limit banner
-  limitBanner: {
-    position: 'absolute', bottom: 16, left: 16, right: 16,
-    backgroundColor: C.amberBg,
-    borderWidth: 1, borderColor: C.amberBorder,
-    borderRadius: 12,
-    paddingVertical: 10, paddingHorizontal: 14,
-  },
-  limitBannerText: { fontSize: 13, color: C.amber, fontWeight: '600', textAlign: 'center' },
-
-  // Empty
-  empty: { alignItems: 'center', paddingTop: 50, gap: 8 },
-  emptyIcon: { fontSize: 36 },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: C.gray700 },
-  emptyText: { fontSize: 14, color: C.gray500 },
-
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: C.overlay,
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: C.white,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingTop: 12,
-    paddingHorizontal: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-    alignItems: 'center',
-    minHeight: 480,
-  },
-  modalHandle: {
-    width: 40, height: 4, borderRadius: 2,
-    backgroundColor: C.gray200,
-    marginBottom: 16,
-  },
-  modalAccent: {
-    width: 48, height: 4, borderRadius: 2, marginBottom: 16,
-  },
-  modalToolPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: C.gray100,
-    borderRadius: 20,
-    paddingVertical: 6, paddingHorizontal: 14,
-    marginBottom: 12,
-  },
-  modalToolCode: { fontSize: 12, fontWeight: '700', color: C.gray700 },
-  modalToolDivider: { width: 1, height: 12, backgroundColor: C.gray400 },
-  modalToolName: { fontSize: 12, color: C.gray500, fontWeight: '500', maxWidth: 160 },
-  modalActionBadge: {
-    borderRadius: 20, paddingVertical: 5, paddingHorizontal: 16, marginBottom: 16,
-  },
-  modalActionText: { fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
-
-  modalTitle: {
-    fontSize: 22, fontWeight: '800', color: C.black,
-    textAlign: 'center', letterSpacing: -0.3, lineHeight: 30,
-    marginBottom: 8,
-  },
-  modalSubtitle: {
-    fontSize: 14, color: C.gray500, textAlign: 'center', lineHeight: 20,
-    marginBottom: 28,
-  },
-
-  // NFC pulse
-  nfcPulseContainer: {
-    width: 120, height: 120,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 24,
-  },
-  nfcRing: {
-    position: 'absolute',
-    width: 100, height: 100, borderRadius: 50,
-    borderWidth: 2,
-    borderColor: C.orange,
-  },
-  nfcIconCircle: {
-    width: 64, height: 64, borderRadius: 32,
-    backgroundColor: C.orange,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: C.orange,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4, shadowRadius: 10, elevation: 6,
-  },
-
-  testButton: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28,
-    marginBottom: 12,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
-  },
-  testButtonText: { fontSize: 15, fontWeight: '700', color: C.white },
-
-  manualLink: { paddingVertical: 8, marginBottom: 4 },
-  manualLinkText: { fontSize: 13, color: C.gray500, textDecorationLine: 'underline' },
-
-  cancelBtn: {
-    paddingVertical: 10, paddingHorizontal: 24,
-  },
-  cancelBtnText: { fontSize: 14, color: C.gray400, fontWeight: '600' },
-
-  // Success
-  successContainer: { alignItems: 'center', gap: 12, paddingTop: 24, paddingBottom: 24 },
-  successCircle: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: C.green,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 8,
-    shadowColor: C.green,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4, shadowRadius: 12, elevation: 6,
-  },
-  successCheck: { fontSize: 38, color: C.white, fontWeight: '800' },
-  successTitle: { fontSize: 22, fontWeight: '800', color: C.black },
-  successSub: { fontSize: 14, color: C.gray500 },
+  listSection: { padding: 16, flex: 1 },
+  toolItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.white, borderRadius: 10, padding: 12, marginBottom: 8, gap: 10 },
+  toolItemIcon: { width: 40, height: 40, borderRadius: 8, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
+  toolItemBody: { flex: 1 },
+  toolItemName: { fontSize: 13, fontWeight: '700', color: C.black },
+  toolItemCode: { fontSize: 11, color: C.gray500, marginTop: 2 },
+  empty: { textAlign: 'center', color: C.gray500, fontSize: 14, marginTop: 20 },
 });

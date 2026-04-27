@@ -1,7 +1,6 @@
 /**
- * app/(tabs)/ferramentas.tsx (Refactored)
- * Tela de Ferramentas - Colaborador
- * Integração com API real + NFC Manager
+ * app/(tabs)/ferramentas.tsx — Marilan v2 Premium
+ * Design: Industrial Precision · Laranja Marilan + Branco
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,9 +9,11 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
   Easing,
   FlatList,
   Modal,
+  Platform,
   StatusBar,
   StyleSheet,
   Text,
@@ -21,35 +22,40 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { apiClient } from '../../services/api';
 import { nfcService } from '../../services/nfc';
 
-// ─── Theme ────────────────────────────────────────────────────────────────────
-const C = {
-  orange: '#F26419',
-  orangeLight: '#FF8C42',
-  orangeDark: '#C94E0F',
-  orangeGhost: 'rgba(242,100,25,0.08)',
+const { width: SW } = Dimensions.get('window');
+
+// ─── Design System ─────────────────────────────────────────────────────────────
+const D = {
+  orange: '#F05A00',
+  orange2: '#FF7A2F',
+  orange3: '#FFB085',
+  orangeGlow: 'rgba(240,90,0,0.10)',
+  orangeDark: '#B84400',
+  orangeDim: 'rgba(240,90,0,0.08)',
   white: '#FFFFFF',
-  offWhite: '#F7F8FA',
-  gray100: '#F0F1F3',
-  gray200: '#E2E4E8',
-  gray400: '#B0B5BE',
-  gray500: '#8A8F9E',
-  gray700: '#4A4F5C',
-  black: '#1A1C22',
-  statusGreen: '#27AE60',
-  statusGreenBg: 'rgba(39,174,96,0.10)',
-  statusRed: '#E53935',
-  statusRedBg: 'rgba(229,57,53,0.10)',
-  statusAmber: '#F59E0B',
-  statusAmberBg: 'rgba(245,158,11,0.10)',
+  offWhite: '#FAFAF9',
+  gray50: '#F7F6F4',
+  gray100: '#F0EDEA',
+  gray200: '#E2DDD8',
+  gray300: '#C8C0B8',
+  gray400: '#AEA49A',
+  gray500: '#7A7068',
+  gray700: '#3A332B',
+  black: '#1A1510',
+  green: '#1A9960',
+  greenBg: 'rgba(26,153,96,0.08)',
+  greenText: '#116640',
+  red: '#D93B2B',
+  redBg: 'rgba(217,59,43,0.08)',
+  amber: '#C97800',
+  amberBg: 'rgba(201,120,0,0.08)',
 };
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 type ToolStatus = 'Disponível' | 'Em uso' | 'Em manutenção';
-
 interface Ferramenta {
   codigo: string;
   nome: string;
@@ -58,483 +64,517 @@ interface Ferramenta {
   alocadoPara?: string;
 }
 
-type ModalStep = 'swap' | 'waiting_approval' | 'receiver_view';
+// ─── SVG Icons ─────────────────────────────────────────────────────────────────
+const WrenchIcon = ({ size = 18, color = D.orange }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+      stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
 
-// ─── Toast Component ──────────────────────────────────────────────────────────
-function Toast({ message, visible }: { message: string; visible: boolean }) {
-  const opacity = useRef(new Animated.Value(0)).current;
+const SearchIcon = ({ size = 16, color = D.gray400 }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={2} />
+    <Path d="M16.5 16.5L21 21" stroke={color} strokeWidth={2} strokeLinecap="round" />
+  </Svg>
+);
 
-  useEffect(() => {
-    if (visible) {
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.delay(2200),
-        Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }),
-      ]).start();
-    }
-  }, [visible]);
+const ChevronIcon = ({ color = D.gray300 }: { color?: string }) => (
+  <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+    <Path d="M9 18L15 12L9 6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
 
+const UserIcon = ({ color = D.red, size = 12 }: { color?: string; size?: number }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx={12} cy={8} r={4} stroke={color} strokeWidth={2} />
+    <Path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke={color} strokeWidth={2} strokeLinecap="round" />
+  </Svg>
+);
+
+const XIcon = ({ size = 14, color = D.gray500 }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M18 6L6 18M6 6l12 12" stroke={color} strokeWidth={2} strokeLinecap="round" />
+  </Svg>
+);
+
+const NFCIcon = ({ size = 38, color = D.orange }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x={2} y={2} width={20} height={20} rx={3} stroke={color} strokeWidth={1.5} />
+    <Path d="M8 8.5C9.2 7.3 10.8 6.5 12.6 6.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    <Path d="M6 6.5C7.8 4.7 10.1 3.5 12.6 3.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeOpacity={0.35} />
+    <Circle cx={9.5} cy={14} r={2.5} stroke={color} strokeWidth={1.8} />
+    <Path d="M12 14h6v6l-2-1.5L14 20V14" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+const ArrowRight = ({ color = D.white }: { color?: string }) => (
+  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+    <Path d="M5 12h14M12 5l7 7-7 7" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+// ─── Status Badge ──────────────────────────────────────────────────────────────
+const STATUS = {
+  'Disponível': { dot: D.green, bg: D.greenBg, text: D.greenText },
+  'Em uso': { dot: D.red, bg: D.redBg, text: D.red },
+  'Em manutenção': { dot: D.amber, bg: D.amberBg, text: D.amber },
+};
+
+function StatusBadge({ status }: { status: ToolStatus }) {
+  const c = STATUS[status] || STATUS['Disponível'];
   return (
-    <Animated.View style={[toastStyles.container, { opacity }]} pointerEvents="none">
-      <Text style={toastStyles.icon}>✅</Text>
-      <Text style={toastStyles.text}>{message}</Text>
-    </Animated.View>
+    <View style={[sb.pill, { backgroundColor: c.bg }]}>
+      <View style={[sb.dot, { backgroundColor: c.dot }]} />
+      <Text style={[sb.label, { color: c.text }]}>{status}</Text>
+    </View>
   );
 }
-
-const toastStyles = StyleSheet.create({
-  container: {
-    position: 'absolute',
-    bottom: 40,
-    left: 24,
-    right: 24,
-    backgroundColor: C.black,
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    zIndex: 9999,
-  },
-  icon: { fontSize: 20 },
-  text: { color: C.white, fontSize: 14, fontWeight: '600', flex: 1 },
+const sb = StyleSheet.create({
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 99 },
+  dot: { width: 5.5, height: 5.5, borderRadius: 3 },
+  label: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
 });
 
-// ─── NFC Pulse Icon ───────────────────────────────────────────────────────────
-function NfcPulseIcon() {
-  const ring1 = useRef(new Animated.Value(0)).current;
-  const ring2 = useRef(new Animated.Value(0)).current;
-  const ring3 = useRef(new Animated.Value(0)).current;
+// ─── NFC Pulse ─────────────────────────────────────────────────────────────────
+function NFCPulse({ active }: { active: boolean }) {
+  const rings = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
+  const ref = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    const createPulse = (anim: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(anim, { toValue: 1, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
-        ])
+    if (active) {
+      const a = Animated.parallel(
+        rings.map((r, i) =>
+          Animated.loop(Animated.sequence([
+            Animated.delay(i * 360),
+            Animated.timing(r, { toValue: 1, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+            Animated.timing(r, { toValue: 0, duration: 0, useNativeDriver: true }),
+          ]))
+        )
       );
-
-    const a1 = createPulse(ring1, 0);
-    const a2 = createPulse(ring2, 400);
-    const a3 = createPulse(ring3, 800);
-    a1.start();
-    a2.start();
-    a3.start();
-    return () => {
-      a1.stop();
-      a2.stop();
-      a3.stop();
-    };
-  }, []);
-
-  const ringStyle = (anim: Animated.Value) => ({
-    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.8] }) }],
-    opacity: anim.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.5, 0] }),
-  });
+      ref.current = a;
+      a.start();
+    } else {
+      ref.current?.stop();
+      rings.forEach(r => r.setValue(0));
+    }
+    return () => { ref.current?.stop(); };
+  }, [active]);
 
   return (
-    <View style={nfcStyles.wrapper}>
-      {[ring1, ring2, ring3].map((r, i) => (
-        <Animated.View key={i} style={[nfcStyles.ring, ringStyle(r)]} />
+    <View style={np.wrap}>
+      {rings.map((r, i) => (
+        <Animated.View key={i} style={[np.ring, {
+          transform: [{ scale: r.interpolate({ inputRange: [0, 1], outputRange: [0.5, 2.2] }) }],
+          opacity: r.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.28, 0] }),
+        }]} />
       ))}
-      <View style={nfcStyles.iconBox}>
-        <Svg width={36} height={36} viewBox="0 0 24 24" fill="none">
-          <Path d="M20 2H4C2.9 2 2 2.9 2 4V20C2 21.1 2.9 22 4 22H20C21.1 22 22 21.1 22 20V4C22 2.9 21.1 2 20 2Z" stroke={C.orange} strokeWidth={1.5} strokeLinecap="round" />
-          <Path d="M8.5 8.5C9.8 7.2 11.6 6.5 13.5 6.5" stroke={C.orange} strokeWidth={1.8} strokeLinecap="round" />
-          <Path d="M6.5 6.5C8.3 4.7 10.8 3.5 13.5 3.5" stroke={C.orange} strokeWidth={1.8} strokeLinecap="round" strokeOpacity={0.4} />
-          <Circle cx={10} cy={13} r={2.5} stroke={C.orange} strokeWidth={1.8} />
-          <Path d="M12.5 13H18V19L16 17.5L14 19V13" stroke={C.orange} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-        </Svg>
+      <View style={np.core}>
+        <NFCIcon size={34} color={D.orange} />
       </View>
     </View>
   );
 }
-
-const nfcStyles = StyleSheet.create({
-  wrapper: { width: 120, height: 120, alignItems: 'center', justifyContent: 'center' },
-  ring: { position: 'absolute', width: 100, height: 100, borderRadius: 50, borderWidth: 2, borderColor: C.orange },
-  iconBox: { width: 72, height: 72, borderRadius: 36, backgroundColor: C.orangeGhost, borderWidth: 2, borderColor: `${C.orange}30`, alignItems: 'center', justifyContent: 'center' },
+const np = StyleSheet.create({
+  wrap: { width: 116, height: 116, alignItems: 'center', justifyContent: 'center' },
+  ring: { position: 'absolute', width: 90, height: 90, borderRadius: 45, borderWidth: 1.5, borderColor: D.orange },
+  core: { width: 76, height: 76, borderRadius: 38, backgroundColor: D.orangeDim, borderWidth: 2, borderColor: `${D.orange}25`, alignItems: 'center', justifyContent: 'center' },
 });
 
-// ─── Swap Modal ───────────────────────────────────────────────────────────────
-interface SwapModalProps {
-  visible: boolean;
-  tool: Ferramenta | null;
-  onClose: () => void;
-  onSuccess: (toolCodigo: string) => void;
-}
-
-function SwapModal({ visible, tool, onClose, onSuccess }: SwapModalProps) {
-  const [step, setStep] = useState<ModalStep>('swap');
-  const [isLoading, setIsLoading] = useState(false);
-  const [nfcSupported, setNfcSupported] = useState(true);
-  const [manualCracha, setManualCracha] = useState('');
-  const [manualObservacao, setManualObservacao] = useState('');
-  const slideAnim = useRef(new Animated.Value(300)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+// ─── Toast ─────────────────────────────────────────────────────────────────────
+function Toast({ message, visible }: { message: string; visible: boolean }) {
+  const y = useRef(new Animated.Value(20)).current;
+  const op = useRef(new Animated.Value(0)).current;
+  const s = useRef(new Animated.Value(0.94)).current;
 
   useEffect(() => {
     if (visible) {
-      setStep('swap');
-      setIsLoading(false);
-      setManualCracha('');
-      setManualObservacao('');
-      checkNFCSupport();
-      startNFCReading();
-      
       Animated.parallel([
-        Animated.timing(slideAnim, { toValue: 0, duration: 380, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(fadeAnim, { toValue: 1, duration: 280, useNativeDriver: true }),
+        Animated.spring(y, { toValue: 0, tension: 130, friction: 11, useNativeDriver: true }),
+        Animated.timing(op, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.spring(s, { toValue: 1, tension: 130, friction: 11, useNativeDriver: true }),
       ]).start();
     } else {
-      slideAnim.setValue(300);
-      fadeAnim.setValue(0);
+      Animated.parallel([
+        Animated.timing(y, { toValue: 14, duration: 260, useNativeDriver: true }),
+        Animated.timing(op, { toValue: 0, duration: 260, useNativeDriver: true }),
+      ]).start();
     }
   }, [visible]);
 
-  const checkNFCSupport = async () => {
-    const supported = await nfcService.checkNFCSupport();
-    setNfcSupported(supported);
-  };
+  return (
+    <Animated.View style={[ts.wrap, { opacity: op, transform: [{ translateY: y }, { scale: s }] }]} pointerEvents="none">
+      <View style={ts.pill}>
+        <View style={ts.iconBox}>
+          <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+            <Path d="M20 6L9 17L4 12" stroke={D.white} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </View>
+        <Text style={ts.text}>{message}</Text>
+      </View>
+    </Animated.View>
+  );
+}
+const ts = StyleSheet.create({
+  wrap: { position: 'absolute', bottom: 24, left: 20, right: 20, zIndex: 9999 },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: D.black, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 18, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.22, shadowRadius: 16, elevation: 10 },
+  iconBox: { width: 26, height: 26, borderRadius: 13, backgroundColor: D.green, alignItems: 'center', justifyContent: 'center' },
+  text: { fontSize: 14, fontWeight: '600', color: D.white, flex: 1, letterSpacing: 0.1 },
+});
 
-  const startNFCReading = async () => {
-    if (!tool) return;
-    
-    try {
-      const result = await nfcService.readTag();
-      if (result.success) {
-        // Simular espera por aprovação e então prosseguir para troca
-        setStep('waiting_approval');
-        setTimeout(() => {
-          handleManualSwap();
-        }, 2000);
-      } else {
-        console.log('NFC read cancelled or failed');
-      }
-    } catch (error) {
-      console.error('Erro ao ler NFC:', error);
+// ─── Swap Modal ────────────────────────────────────────────────────────────────
+function SwapModal({ visible, tool, onClose, onSuccess }: {
+  visible: boolean;
+  tool: Ferramenta | null;
+  onClose: () => void;
+  onSuccess: (codigo: string) => void;
+}) {
+  const [cracha, setCracha] = useState('');
+  const [obs, setObs] = useState('');
+  const [loading, setLoading] = useState(false);
+  const slideY = useRef(new Animated.Value(400)).current;
+  const bgOp = useRef(new Animated.Value(0)).current;
+  const btnScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setCracha(''); setObs(''); setLoading(false);
+      nfcService.readTag().catch(() => {});
+      Animated.parallel([
+        Animated.spring(slideY, { toValue: 0, tension: 68, friction: 13, useNativeDriver: true }),
+        Animated.timing(bgOp, { toValue: 1, duration: 280, useNativeDriver: true }),
+      ]).start();
+    } else {
+      slideY.setValue(400);
+      bgOp.setValue(0);
     }
-  };
+  }, [visible]);
 
-  const handleManualSwap = async () => {
-    if (!tool || !manualCracha.trim()) return;
-    
-    try {
-      setIsLoading(true);
-      const userCracha = await AsyncStorage.getItem('userCracha');
-      
-      if (!userCracha) {
-        throw new Error('Dados de usuário não encontrados');
-      }
-
-      const response = await apiClient.trocar({
-        cracha_novo_colaborador: manualCracha.trim(),
-        ferramentas: [
-          {
-            codigo: tool.codigo,
-            qtd: 1,
-            checklist: 'REALIZADO',
-            observacao: manualObservacao.trim() || 'Troca manual',
-          },
-        ],
-      });
-
-      handleClose();
-      setTimeout(() => onSuccess(tool.codigo), 320);
-    } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Erro ao transferir ferramenta');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleClose = () => {
+  const close = () => {
+    nfcService.stop();
     Animated.parallel([
-      Animated.timing(slideAnim, { toValue: 300, duration: 280, useNativeDriver: true }),
-      Animated.timing(fadeAnim, { toValue: 0, duration: 220, useNativeDriver: true }),
-    ]).start(() => {
-      onClose();
-      nfcService.stop();
-    });
+      Animated.timing(slideY, { toValue: 400, duration: 260, useNativeDriver: true }),
+      Animated.timing(bgOp, { toValue: 0, duration: 220, useNativeDriver: true }),
+    ]).start(() => onClose());
+  };
+
+  const submit = async () => {
+    if (!cracha.trim() || !tool) return;
+    Animated.sequence([
+      Animated.timing(btnScale, { toValue: 0.97, duration: 70, useNativeDriver: true }),
+      Animated.spring(btnScale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
+    ]).start();
+    try {
+      setLoading(true);
+      await apiClient.trocar({
+        cracha_novo_colaborador: cracha.trim(),
+        ferramentas: [{ codigo: tool.codigo, qtd: 1, checklist: 'REALIZADO', observacao: obs.trim() || 'Troca via app' }],
+      });
+      close();
+      setTimeout(() => onSuccess(tool.codigo), 320);
+    } catch (e: any) {
+      Alert.alert('Erro', e.message || 'Falha ao transferir');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!tool) return null;
+  const canSubmit = cracha.trim().length > 0 && !loading;
 
   return (
-    <Modal transparent visible={visible} animationType="none" onRequestClose={handleClose}>
-      <Animated.View style={[modalStyles.overlay, { opacity: fadeAnim }]}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
+    <Modal transparent visible={visible} animationType="none" onRequestClose={close}>
+      <Animated.View style={[ms.backdrop, { opacity: bgOp }]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={close} />
+      </Animated.View>
 
-        <Animated.View style={[modalStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
-          <View style={modalStyles.handle} />
+      <Animated.View style={[ms.sheet, { transform: [{ translateY: slideY }] }]}>
+        <View style={ms.handle} />
 
-          <View style={modalStyles.toolHeader}>
-            <View style={modalStyles.toolIconBox}>
-              <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-                <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke={C.orange} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={modalStyles.toolName}>{tool.nome}</Text>
-              <Text style={modalStyles.toolCode}>{tool.codigo}</Text>
-            </View>
-            <TouchableOpacity onPress={handleClose} style={modalStyles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M18 6L6 18M6 6l12 12" stroke={C.gray500} strokeWidth={2} strokeLinecap="round" />
-              </Svg>
-            </TouchableOpacity>
+        {/* Tool header */}
+        <View style={ms.toolRow}>
+          <View style={ms.toolIconBox}>
+            <WrenchIcon size={20} color={D.orange} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={ms.toolName} numberOfLines={1}>{tool.nome}</Text>
+            <Text style={ms.toolMeta}>{tool.categoria} · {tool.codigo}</Text>
+          </View>
+          <TouchableOpacity onPress={close} style={ms.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <XIcon size={14} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={ms.sep} />
+
+        <View style={ms.body}>
+          <NFCPulse active={true} />
+
+          <Text style={ms.title}>Transferir Ferramenta</Text>
+          <Text style={ms.sub}>Insira o crachá do colaborador{'\n'}que receberá esta ferramenta</Text>
+
+          {/* Crachá input */}
+          <View style={ms.inputWrap}>
+            <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
+              <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
+              <Circle cx={9} cy={12} r={2.5} stroke={D.orange} strokeWidth={1.6} />
+              <Path d="M14 10h4M14 14h3" stroke={D.orange} strokeWidth={1.5} strokeLinecap="round" />
+            </Svg>
+            <TextInput
+              style={ms.input}
+              placeholder="Crachá do colaborador"
+              placeholderTextColor={D.gray300}
+              value={cracha}
+              onChangeText={setCracha}
+              keyboardType="numeric"
+              autoCorrect={false}
+            />
           </View>
 
-          <View style={modalStyles.divider} />
+          <View style={[ms.inputWrap, { height: 52 }]}>
+            <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
+              <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke={D.gray300} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+            <TextInput
+              style={[ms.input, { paddingTop: 0 }]}
+              placeholder="Observação (opcional)"
+              placeholderTextColor={D.gray300}
+              value={obs}
+              onChangeText={setObs}
+              autoCapitalize="sentences"
+            />
+          </View>
 
-          {step === 'swap' && (
-            <View style={modalStyles.stepContainer}>
-              <View style={modalStyles.swapHeader}>
-                <NfcPulseIcon />
-                <View style={modalStyles.swapText}>
-                  <Text style={modalStyles.stepTitle}>Troca de Ferramenta</Text>
-                  <Text style={modalStyles.stepSubtitle}>Aproxime o dispositivo NFC ou{'\n'}preencha os dados manualmente</Text>
-                </View>
-              </View>
-
-              <View style={modalStyles.swapForm}>
-                <View style={modalStyles.inputGroup}>
-                  <Text style={modalStyles.inputLabel}>Crachá do Novo Colaborador</Text>
-                  <TextInput
-                    style={modalStyles.input}
-                    placeholder="Digite o número do crachá..."
-                    placeholderTextColor={C.gray400}
-                    value={manualCracha}
-                    onChangeText={setManualCracha}
-                    keyboardType="numeric"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </View>
-
-                <View style={modalStyles.inputGroup}>
-                  <Text style={modalStyles.inputLabel}>Observação (opcional)</Text>
-                  <TextInput
-                    style={[modalStyles.input, modalStyles.inputMultiline]}
-                    placeholder="Ex: Troca por manutenção..."
-                    placeholderTextColor={C.gray400}
-                    value={manualObservacao}
-                    onChangeText={setManualObservacao}
-                    multiline
-                    numberOfLines={2}
-                    autoCapitalize="sentences"
-                  />
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[modalStyles.confirmBtn, (!manualCracha.trim()) && modalStyles.confirmBtnDisabled]}
-                onPress={handleManualSwap}
-                activeOpacity={0.7}
-                disabled={!manualCracha.trim()}
-              >
-                <Text style={[modalStyles.confirmBtnText, (!manualCracha.trim()) && modalStyles.confirmBtnTextDisabled]}>
-                  Confirmar Troca
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {step === 'waiting_approval' && (
-            <View style={modalStyles.stepContainer}>
-              <View style={modalStyles.waitingIconBox}>
-                <ActivityIndicator size="large" color={C.orange} />
-              </View>
-              <Text style={modalStyles.stepTitle}>Processando Troca</Text>
-              <Text style={modalStyles.stepSubtitle}>Enviando solicitação de transferência...</Text>
-            </View>
-          )}
-        </Animated.View>
+          <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }] }}>
+            <TouchableOpacity
+              style={[ms.confirmBtn, !canSubmit && ms.confirmBtnDisabled]}
+              onPress={submit}
+              disabled={!canSubmit}
+              activeOpacity={0.88}
+            >
+              {loading
+                ? <ActivityIndicator color={D.white} size="small" />
+                : (
+                  <>
+                    <Text style={[ms.confirmText, !canSubmit && ms.confirmTextDisabled]}>Confirmar Transferência</Text>
+                    <ArrowRight color={canSubmit ? D.white : D.gray400} />
+                  </>
+                )
+              }
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
       </Animated.View>
     </Modal>
   );
 }
-
-const modalStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: C.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 40, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 20 },
-  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: C.gray200, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
-  divider: { height: 1, backgroundColor: C.gray100, marginHorizontal: 20, marginBottom: 4 },
-  toolHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 16 },
-  toolIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
-  toolName: { fontSize: 15, fontWeight: '700', color: C.black },
-  toolCode: { fontSize: 12, color: C.gray500, marginTop: 2 },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: C.gray100, alignItems: 'center', justifyContent: 'center' },
-  stepContainer: { alignItems: 'center', paddingHorizontal: 28, paddingTop: 20, gap: 8, minHeight: 260 },
-  stepTitle: { fontSize: 20, fontWeight: '800', color: C.black, marginTop: 12, textAlign: 'center' },
-  stepSubtitle: { fontSize: 14, color: C.gray500, textAlign: 'center', lineHeight: 22 },
-  manualBtn: { marginTop: 20, paddingVertical: 8, paddingHorizontal: 16 },
-  manualBtnText: { fontSize: 13, color: C.orange, fontWeight: '600', textDecorationLine: 'underline' },
-  waitingIconBox: { width: 80, height: 80, borderRadius: 40, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
-  manualIconBox: { width: 80, height: 80, borderRadius: 40, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
-  swapHeader: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
-  swapText: { flex: 1 },
-  swapForm: { width: '100%', gap: 16, marginTop: 20 },
-  inputGroup: { gap: 6 },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: C.gray700 },
-  input: { borderWidth: 1.5, borderColor: C.gray200, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: C.black, backgroundColor: C.white },
-  inputMultiline: { height: 60, textAlignVertical: 'top', paddingTop: 12 },
-  confirmBtn: { backgroundColor: C.orange, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 20 },
-  confirmBtnDisabled: { backgroundColor: C.gray200 },
-  confirmBtnText: { fontSize: 16, fontWeight: '700', color: C.white },
-  confirmBtnTextDisabled: { color: C.gray500 },
+const ms = StyleSheet.create({
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(26,21,16,0.5)' },
+  sheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: D.white, borderTopLeftRadius: 30, borderTopRightRadius: 30,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 36,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 20,
+  },
+  handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: D.gray200, alignSelf: 'center', marginTop: 12, marginBottom: 6 },
+  toolRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingVertical: 14 },
+  toolIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
+  toolName: { fontSize: 15, fontWeight: '800', color: D.black, letterSpacing: -0.1 },
+  toolMeta: { fontSize: 12, color: D.gray500, marginTop: 2 },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: D.gray100, alignItems: 'center', justifyContent: 'center' },
+  sep: { height: 1, backgroundColor: D.gray100 },
+  body: { paddingHorizontal: 24, paddingTop: 24, alignItems: 'center', gap: 14 },
+  title: { fontSize: 22, fontWeight: '900', color: D.black, letterSpacing: -0.3, textAlign: 'center' },
+  sub: { fontSize: 14, color: D.gray500, textAlign: 'center', lineHeight: 22, marginBottom: 4 },
+  inputWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    width: '100%', height: 56, borderRadius: 14,
+    borderWidth: 1.5, borderColor: D.gray200,
+    backgroundColor: D.gray50, paddingHorizontal: 16,
+  },
+  input: { flex: 1, fontSize: 15, color: D.black, fontWeight: '500' },
+  confirmBtn: {
+    width: '100%', height: 58, borderRadius: 16, backgroundColor: D.orange,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6,
+    marginTop: 4,
+  },
+  confirmBtnDisabled: { backgroundColor: D.gray200, shadowOpacity: 0 },
+  confirmText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
+  confirmTextDisabled: { color: D.gray400 },
 });
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
-function SearchIcon({ color = C.gray400 }: { color?: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-      <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={2} />
-      <Path d="M16.5 16.5L21 21" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-function ToolIcon({ color = C.orange }: { color?: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-      <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
-
-function UserIcon({ color = C.orange }: { color?: string }) {
-  return (
-    <Svg width={13} height={13} viewBox="0 0 24 24" fill="none">
-      <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      <Circle cx={12} cy={7} r={4} stroke={color} strokeWidth={2} />
-    </Svg>
-  );
-}
-
-function ClearIcon({ color = C.gray400 }: { color?: string }) {
-  return (
-    <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-      <Path d="M18 6L6 18M6 6l12 12" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-// ─── Status Badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: ToolStatus }) {
-  const config = {
-    'Disponível': { color: C.statusGreen, bg: C.statusGreenBg, dot: C.statusGreen },
-    'Em uso': { color: C.statusRed, bg: C.statusRedBg, dot: C.statusRed },
-    'Em manutenção': { color: C.statusAmber, bg: C.statusAmberBg, dot: C.statusAmber },
-  }[status];
-
-  return (
-    <View style={[styles.badge, { backgroundColor: config.bg }]}>
-      <View style={[styles.badgeDot, { backgroundColor: config.dot }]} />
-      <Text style={[styles.badgeText, { color: config.color }]}>{status}</Text>
-    </View>
-  );
-}
-
-// ─── Tool Card ────────────────────────────────────────────────────────────────
-function ToolCard({ item, onPress }: { item: Ferramenta; onPress: (item: Ferramenta) => void }) {
-  const isInUse = item.status === 'Em uso';
-
-  return (
-    <TouchableOpacity style={[styles.card, isInUse && styles.cardInteractive]} onPress={() => isInUse && onPress(item)} activeOpacity={isInUse ? 0.75 : 1}>
-      <View style={styles.cardLeft}>
-        <View style={styles.iconBox}>
-          <ToolIcon />
-        </View>
-      </View>
-
-      <View style={styles.cardBody}>
-        <View style={styles.cardTopRow}>
-          <Text style={styles.toolName} numberOfLines={1}>{item.nome}</Text>
-          <StatusBadge status={item.status} />
-        </View>
-
-        <View style={styles.cardMeta}>
-          <View style={styles.metaChip}>
-            <Text style={styles.metaLabel}>CÓD</Text>
-            <Text style={styles.metaValue}>{item.codigo}</Text>
-          </View>
-          <View style={styles.metaDivider} />
-          <View style={styles.metaChip}>
-            <Text style={styles.metaLabel}>CAT</Text>
-            <Text style={styles.metaValue}>{item.categoria}</Text>
-          </View>
-        </View>
-
-        {isInUse && item.alocadoPara && (
-          <View style={styles.allocRow}>
-            <UserIcon color={C.statusRed} />
-            <Text style={styles.allocText} numberOfLines={1}>{item.alocadoPara}</Text>
-            <Text style={styles.swapHint}>  Toque para solicitar troca →</Text>
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-// ─── Filter Tabs ──────────────────────────────────────────────────────────────
+// ─── Filter Chip ───────────────────────────────────────────────────────────────
 const FILTERS: Array<ToolStatus | 'Todos'> = ['Todos', 'Disponível', 'Em uso', 'Em manutenção'];
 
-function FilterTabs({ active, onSelect, counts }: { active: string; onSelect: (f: string) => void; counts: Record<string, number> }) {
+function FilterChips({ active, onSelect, counts }: { active: string; onSelect: (v: string) => void; counts: Record<string, number> }) {
   return (
-    <View style={styles.filterRow}>
-      {FILTERS.map((f) => {
-        const isActive = active === f;
+    <View style={fc.row}>
+      {FILTERS.map(f => {
+        const on = active === f;
         return (
-          <TouchableOpacity key={f} style={[styles.filterChip, isActive && styles.filterChipActive]} onPress={() => onSelect(f)} activeOpacity={0.7}>
-            <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>{f}</Text>
-            {counts[f] !== undefined && (
-              <View style={[styles.filterCount, isActive && styles.filterCountActive]}>
-                <Text style={[styles.filterCountText, isActive && styles.filterCountTextActive]}>{counts[f]}</Text>
-              </View>
-            )}
+          <TouchableOpacity key={f} style={[fc.chip, on && fc.chipOn]} onPress={() => onSelect(f)} activeOpacity={0.75}>
+            <Text style={[fc.label, on && fc.labelOn]}>{f}</Text>
+            <View style={[fc.count, on && fc.countOn]}>
+              <Text style={[fc.countNum, on && fc.countNumOn]}>{counts[f] ?? 0}</Text>
+            </View>
           </TouchableOpacity>
         );
       })}
     </View>
   );
 }
+const fc = StyleSheet.create({
+  row: { flexDirection: 'row', paddingHorizontal: 18, gap: 7, marginTop: 14, marginBottom: 4 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 99, backgroundColor: D.white, borderWidth: 1.5, borderColor: D.gray200 },
+  chipOn: { backgroundColor: D.orange, borderColor: D.orange },
+  label: { fontSize: 12, fontWeight: '600', color: D.gray500 },
+  labelOn: { color: D.white },
+  count: { backgroundColor: D.gray100, borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  countOn: { backgroundColor: 'rgba(255,255,255,0.22)' },
+  countNum: { fontSize: 10, fontWeight: '800', color: D.gray500 },
+  countNumOn: { color: D.white },
+});
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+// ─── Tool Card ──────────────────────────────────────────────────────────────────
+function ToolCard({ item, index, onPress }: { item: Ferramenta; index: number; onPress: (f: Ferramenta) => void }) {
+  const oy = useRef(new Animated.Value(16)).current;
+  const op = useRef(new Animated.Value(0)).current;
+  const sc = useRef(new Animated.Value(1)).current;
+  const isInUse = item.status === 'Em uso';
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(op, { toValue: 1, duration: 220, delay: index * 38, useNativeDriver: true }),
+      Animated.spring(oy, { toValue: 0, tension: 110, friction: 14, delay: index * 38, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const press = () => {
+    if (!isInUse) return;
+    Animated.sequence([
+      Animated.timing(sc, { toValue: 0.978, duration: 65, useNativeDriver: true }),
+      Animated.spring(sc, { toValue: 1, tension: 280, friction: 10, useNativeDriver: true }),
+    ]).start();
+    onPress(item);
+  };
+
+  return (
+    <Animated.View style={[tc.outer, { opacity: op, transform: [{ translateY: oy }, { scale: sc }] }]}>
+      <TouchableOpacity style={[tc.card, isInUse && tc.cardInteractive]} onPress={press} activeOpacity={1}>
+        {/* Left accent bar */}
+        {isInUse && <View style={tc.accent} />}
+
+        {/* Icon */}
+        <View style={[tc.iconBox, isInUse && tc.iconBoxRed]}>
+          <WrenchIcon size={18} color={isInUse ? D.red : D.orange} />
+        </View>
+
+        {/* Content */}
+        <View style={tc.content}>
+          <View style={tc.topRow}>
+            <Text style={tc.name} numberOfLines={1}>{item.nome}</Text>
+            <StatusBadge status={item.status} />
+          </View>
+          <View style={tc.metaRow}>
+            <Text style={tc.code}>{item.codigo}</Text>
+            <View style={tc.sep} />
+            <Text style={tc.cat}>{item.categoria}</Text>
+          </View>
+          {isInUse && item.alocadoPara && (
+            <View style={tc.allocRow}>
+              <UserIcon size={11} color={D.red} />
+              <Text style={tc.allocText}>{item.alocadoPara}</Text>
+              <Text style={tc.tapHint}>Toque para transferir →</Text>
+            </View>
+          )}
+        </View>
+
+        {isInUse && <ChevronIcon color={D.red + '60'} />}
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+const tc = StyleSheet.create({
+  outer: { marginBottom: 8 },
+  card: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: D.white, borderRadius: 16,
+    paddingVertical: 14, paddingHorizontal: 14,
+    borderWidth: 1, borderColor: D.gray200,
+    overflow: 'hidden',
+  },
+  cardInteractive: { borderColor: `${D.red}25`, borderWidth: 1.5 },
+  accent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: D.red },
+  iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
+  iconBoxRed: { backgroundColor: D.redBg },
+  content: { flex: 1, gap: 5 },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  name: { flex: 1, fontSize: 14, fontWeight: '700', color: D.black, letterSpacing: -0.1 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 0 },
+  code: { fontSize: 11, color: D.gray400, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontWeight: '500' },
+  sep: { width: 1, height: 10, backgroundColor: D.gray200, marginHorizontal: 8 },
+  cat: { fontSize: 11, color: D.gray500, fontWeight: '500' },
+  allocRow: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: D.redBg, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 7, alignSelf: 'flex-start' },
+  allocText: { fontSize: 11, fontWeight: '700', color: D.red },
+  tapHint: { fontSize: 10, color: `${D.red}70`, fontStyle: 'italic' },
+});
+
+// ─── Header Stats ──────────────────────────────────────────────────────────────
+function StatBox({ value, label, anim }: { value: number; label: string; anim: Animated.Value }) {
+  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] });
+  return (
+    <Animated.View style={[stb.box, { transform: [{ scale }], opacity: anim }]}>
+      <Text style={stb.value}>{value}</Text>
+      <Text style={stb.label}>{label}</Text>
+    </Animated.View>
+  );
+}
+const stb = StyleSheet.create({
+  box: { flex: 1, alignItems: 'center' },
+  value: { fontSize: 26, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
+  label: { fontSize: 10, color: 'rgba(255,255,255,0.65)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
+});
+
+// ─── Main Screen ───────────────────────────────────────────────────────────────
 export default function FerramentasScreen() {
   const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string>('Todos');
-  const [selectedTool, setSelectedTool] = useState<Ferramenta | null>(null);
+  const [selected, setSelected] = useState<Ferramenta | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [toast, setToast] = useState({ visible: false, message: '' });
-  const [isLoading, setIsLoading] = useState(true);
-  const [userCracha, setUserCracha] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState({ visible: false, msg: '' });
 
-  // Carregar ferramentas na inicialização
+  // Header anims
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const statAnim1 = useRef(new Animated.Value(0)).current;
+  const statAnim2 = useRef(new Animated.Value(0)).current;
+  const statAnim3 = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
-    loadFerramentas();
+    Animated.sequence([
+      Animated.timing(headerAnim, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.stagger(80, [
+        Animated.spring(statAnim1, { toValue: 1, tension: 120, friction: 10, useNativeDriver: true }),
+        Animated.spring(statAnim2, { toValue: 1, tension: 120, friction: 10, useNativeDriver: true }),
+        Animated.spring(statAnim3, { toValue: 1, tension: 120, friction: 10, useNativeDriver: true }),
+      ]),
+    ]).start();
+    load();
   }, []);
 
-  const loadFerramentas = async () => {
+  const load = async () => {
     try {
-      setIsLoading(true);
+      setLoading(true);
       const cracha = await AsyncStorage.getItem('userCracha');
-      setUserCracha(cracha);
-
-      if (cracha) {
-        const data = await apiClient.listarMinhasFerramentas(cracha);
-        setFerramentas(data || []);
-      }
-    } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Erro ao carregar ferramentas');
+      const data = cracha ? await apiClient.listarMinhasFerramentas(cracha) : [];
+      setFerramentas(data || []);
+    } catch (e: any) {
+      Alert.alert('Erro', e.message);
       setFerramentas([]);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
@@ -545,162 +585,154 @@ export default function FerramentasScreen() {
     'Em manutenção': ferramentas.filter(f => f.status === 'Em manutenção').length,
   };
 
-  const filtered = ferramentas.filter(item => {
-    const matchFilter = filter === 'Todos' || item.status === filter;
+  const filtered = ferramentas.filter(f => {
+    const matchF = filter === 'Todos' || f.status === filter;
     const q = query.toLowerCase();
-    const matchQuery = !q || item.nome.toLowerCase().includes(q) || item.codigo.toLowerCase().includes(q) || (item.alocadoPara?.toLowerCase().includes(q) ?? false);
-    return matchFilter && matchQuery;
+    const matchQ = !q || f.nome.toLowerCase().includes(q) || f.codigo.toLowerCase().includes(q);
+    return matchF && matchQ;
   });
 
-  const handleCardPress = (tool: Ferramenta) => {
-    setSelectedTool(tool);
-    setModalVisible(true);
+  const showToast = (msg: string) => {
+    setToast({ visible: true, msg });
+    setTimeout(() => setToast({ visible: false, msg: '' }), 3200);
   };
 
-  const handleModalClose = () => {
-    setModalVisible(false);
-    setTimeout(() => setSelectedTool(null), 400);
-  };
-
-  const handleSwapSuccess = (toolCodigo: string) => {
-    showToast(`✅ Ferramenta ${toolCodigo} transferida com sucesso!`);
-    // Recarregar ferramentas após troca bem-sucedida
-    setTimeout(() => loadFerramentas(), 1000);
-  };
-
-  const showToast = (message: string) => {
-    setToast({ visible: true, message });
-    setTimeout(() => setToast({ visible: false, message: '' }), 3000);
-  };
-
-  if (isLoading) {
-    return (
-      <View style={[styles.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={C.orange} />
-        <Text style={{ marginTop: 12, color: C.gray500 }}>Carregando ferramentas...</Text>
-      </View>
-    );
-  }
+  const headerTY = headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] });
 
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.orange} />
+    <View style={s.root}>
+      <StatusBar barStyle="light-content" backgroundColor={D.orange} />
 
       {/* Header */}
-      <SafeAreaView style={styles.headerSafe} edges={['top']}>
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>Ferramentas</Text>
-            <Text style={styles.headerSub}>{counts.Todos} ferramentas cadastradas</Text>
-          </View>
-          <View style={styles.statsRow}>
-            <View style={styles.statBox}>
-              <Text style={styles.statNumber}>{counts['Disponível']}</Text>
-              <Text style={styles.statLabel}>Disponíveis</Text>
-            </View>
-            <View style={styles.statSep} />
-            <View style={styles.statBox}>
-              <Text style={styles.statNumber}>{counts['Em uso']}</Text>
-              <Text style={styles.statLabel}>Em uso</Text>
-            </View>
-            <View style={styles.statSep} />
-            <View style={styles.statBox}>
-              <Text style={styles.statNumber}>{counts['Em manutenção']}</Text>
-              <Text style={styles.statLabel}>Manutenção</Text>
-            </View>
-          </View>
+      <SafeAreaView style={s.headerZone} edges={['top']}>
+        {/* Decorative dot grid */}
+        <View style={s.dotGrid} pointerEvents="none">
+          {Array.from({ length: 16 }).map((_, i) => (
+            <View key={i} style={s.dot} />
+          ))}
         </View>
+
+        <Animated.View style={[s.header, { opacity: headerAnim, transform: [{ translateY: headerTY }] }]}>
+          <View style={s.headerTop}>
+            <View>
+              <Text style={s.headerTitle}>Ferramentas</Text>
+              <Text style={s.headerSub}>{counts.Todos} itens registrados</Text>
+            </View>
+            <TouchableOpacity onPress={load} style={s.refreshBtn} activeOpacity={0.7}>
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M23 4v6h-6" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                <Path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </TouchableOpacity>
+          </View>
+
+          {/* Stats row */}
+          <View style={s.statsBar}>
+            <StatBox value={counts['Disponível']} label="Disponíveis" anim={statAnim1} />
+            <View style={s.statsDivider} />
+            <StatBox value={counts['Em uso']} label="Em uso" anim={statAnim2} />
+            <View style={s.statsDivider} />
+            <StatBox value={counts['Em manutenção']} label="Manutenção" anim={statAnim3} />
+          </View>
+        </Animated.View>
       </SafeAreaView>
 
       {/* Body */}
-      <View style={styles.body}>
+      <View style={s.body}>
         {/* Search */}
-        <View style={styles.searchWrapper}>
-          <SearchIcon color={query ? C.orange : C.gray400} />
-          <TextInput style={styles.searchInput} placeholder="Buscar por nome ou código…" placeholderTextColor={C.gray400} value={query} onChangeText={setQuery} autoCorrect={false} autoCapitalize="none" />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <ClearIcon />
-            </TouchableOpacity>
-          )}
+        <View style={s.searchRow}>
+          <View style={s.searchBox}>
+            <SearchIcon size={16} color={query ? D.orange : D.gray400} />
+            <TextInput
+              style={s.searchInput}
+              placeholder="Buscar por nome ou código…"
+              placeholderTextColor={D.gray300}
+              value={query}
+              onChangeText={setQuery}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            {!!query && (
+              <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <XIcon size={13} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
-        {/* Filter chips */}
-        <FilterTabs active={filter} onSelect={setFilter} counts={counts} />
+        <FilterChips active={filter} onSelect={setFilter} counts={counts} />
 
         {/* List */}
-        <FlatList
-          data={filtered}
-          keyExtractor={item => item.codigo}
-          renderItem={({ item }) => <ToolCard item={item} onPress={handleCardPress} />}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>🔧</Text>
-              <Text style={styles.emptyTitle}>Nenhuma ferramenta encontrada</Text>
-              <Text style={styles.emptyText}>Tente outro termo ou filtro.</Text>
-            </View>
-          }
-        />
+        {loading ? (
+          <View style={s.loadState}>
+            <ActivityIndicator color={D.orange} size="large" />
+            <Text style={s.loadText}>Carregando ferramentas…</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filtered}
+            keyExtractor={f => f.codigo}
+            renderItem={({ item, index }) => (
+              <ToolCard item={item} index={index} onPress={t => { setSelected(t); setModalVisible(true); }} />
+            )}
+            contentContainerStyle={s.listContent}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={s.empty}>
+                <Text style={s.emptyIcon}>🔧</Text>
+                <Text style={s.emptyTitle}>Nenhuma ferramenta</Text>
+                <Text style={s.emptySub}>{query ? 'Tente outro termo de busca' : 'Sua lista está vazia'}</Text>
+              </View>
+            }
+          />
+        )}
       </View>
 
-      {/* Swap Modal */}
-      <SwapModal visible={modalVisible} tool={selectedTool} onClose={handleModalClose} onSuccess={handleSwapSuccess} />
-
-      {/* Toast */}
-      <Toast message={toast.message} visible={toast.visible} />
+      <SwapModal
+        visible={modalVisible}
+        tool={selected}
+        onClose={() => { setModalVisible(false); setTimeout(() => setSelected(null), 400); }}
+        onSuccess={c => { showToast(`Ferramenta ${c} transferida!`); setTimeout(load, 900); }}
+      />
+      <Toast message={toast.msg} visible={toast.visible} />
     </View>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.orange },
-  headerSafe: { backgroundColor: C.orange },
-  body: { flex: 1, backgroundColor: C.offWhite, borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden', paddingTop: 20 },
-  header: { backgroundColor: C.orange, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 28 },
-  headerContent: { marginBottom: 20 },
-  headerTitle: { fontSize: 26, fontWeight: '800', color: C.white, letterSpacing: -0.3 },
-  headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2, fontWeight: '500' },
-  statsRow: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.12)', borderRadius: 16, paddingVertical: 12, paddingHorizontal: 8 },
-  statBox: { flex: 1, alignItems: 'center' },
-  statNumber: { fontSize: 22, fontWeight: '800', color: C.white },
-  statLabel: { fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 2, fontWeight: '500', textAlign: 'center' },
-  statSep: { width: 1, backgroundColor: 'rgba(255,255,255,0.2)', marginVertical: 4 },
-  searchWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.white, borderRadius: 14, marginHorizontal: 16, paddingHorizontal: 14, height: 48, gap: 10 },
-  searchInput: { flex: 1, fontSize: 15, color: C.black, paddingVertical: 0 },
-  filterRow: { flexDirection: 'row', paddingHorizontal: 16, marginTop: 12, marginBottom: 4, gap: 8 },
-  filterChip: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, backgroundColor: C.white, borderWidth: 1.5, borderColor: C.gray200, gap: 5 },
-  filterChipActive: { backgroundColor: C.orange, borderColor: C.orange },
-  filterChipText: { fontSize: 12, fontWeight: '600', color: C.gray500 },
-  filterChipTextActive: { color: C.white },
-  filterCount: { backgroundColor: C.gray100, borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  filterCountActive: { backgroundColor: 'rgba(255,255,255,0.25)' },
-  filterCountText: { fontSize: 10, fontWeight: '700', color: C.gray500 },
-  filterCountTextActive: { color: C.white },
-  listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 },
-  card: { backgroundColor: C.white, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  cardInteractive: { borderWidth: 1.5, borderColor: `${C.statusRed}20` },
-  cardLeft: {},
-  iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
-  cardBody: { flex: 1, gap: 6 },
-  cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  toolName: { flex: 1, fontSize: 15, fontWeight: '700', color: C.black },
-  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 0 },
-  metaChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  metaLabel: { fontSize: 10, fontWeight: '700', color: C.gray400, letterSpacing: 0.5 },
-  metaValue: { fontSize: 12, fontWeight: '600', color: C.gray700 },
-  metaDivider: { width: 1, height: 12, backgroundColor: C.gray200, marginHorizontal: 10 },
-  allocRow: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.statusRedBg, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8, alignSelf: 'flex-start' },
-  allocText: { fontSize: 12, fontWeight: '600', color: C.statusRed },
-  swapHint: { fontSize: 11, color: `${C.statusRed}80`, fontStyle: 'italic' },
-  badge: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3, gap: 4 },
-  badgeDot: { width: 6, height: 6, borderRadius: 3 },
-  badgeText: { fontSize: 11, fontWeight: '700' },
+// ─── Styles ────────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: D.orange },
+  headerZone: { backgroundColor: D.orange, overflow: 'hidden' },
+  dotGrid: {
+    position: 'absolute', right: 20, top: 20,
+    flexDirection: 'row', flexWrap: 'wrap', width: 72, gap: 8, opacity: 0.18,
+  },
+  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: D.white },
+  header: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 28 },
+  headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
+  headerTitle: { fontSize: 28, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
+  headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2, fontWeight: '500' },
+  refreshBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  statsBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.14)', borderRadius: 16, paddingVertical: 14, paddingHorizontal: 6 },
+  statsDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.15)' },
+
+  body: { flex: 1, backgroundColor: D.offWhite, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingTop: 18, overflow: 'hidden' },
+  searchRow: { paddingHorizontal: 18 },
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: D.white, borderRadius: 14,
+    paddingHorizontal: 16, height: 50,
+    borderWidth: 1, borderColor: D.gray200,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: D.black, fontWeight: '500' },
+
+  listContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 28 },
+
+  loadState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadText: { fontSize: 14, color: D.gray500, fontWeight: '500' },
+
   empty: { alignItems: 'center', paddingTop: 60, gap: 8 },
-  emptyIcon: { fontSize: 40 },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: C.gray700 },
-  emptyText: { fontSize: 14, color: C.gray500 },
+  emptyIcon: { fontSize: 44 },
+  emptyTitle: { fontSize: 17, fontWeight: '800', color: D.gray700 },
+  emptySub: { fontSize: 14, color: D.gray400 },
 });

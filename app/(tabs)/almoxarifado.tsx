@@ -1,14 +1,13 @@
 /**
- * app/(tabs)/almoxarifado.tsx
- * Tela de Almoxarifado — Paleta Marilan (laranja + branco)
- * Fluxo: Clica ferramenta → NFC almoxarife autoriza → registra retirada
+ * app/(tabs)/almoxarifado.tsx — Marilan v2 Premium
+ * Design: Industrial Precision · Laranja Marilan + Branco
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   Keyboard,
   Modal,
   Platform,
@@ -21,329 +20,353 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { apiClient } from '../../services/api';
 import { nfcService } from '../../services/nfc';
 
-// ─── Design System Marilan ────────────────────────────────────────────────────
-const C = {
-  orange: '#F26419',
-  orangeLight: '#FF8C42',
-  orangeDark: '#C94E0F',
-  orangeGhost: 'rgba(242,100,25,0.08)',
+// ─── Design System ─────────────────────────────────────────────────────────────
+const D = {
+  orange: '#F05A00',
+  orange2: '#FF7A2F',
+  orangeGlow: 'rgba(240,90,0,0.1)',
+  orangeDim: 'rgba(240,90,0,0.07)',
+  orangeDark: '#B84400',
   white: '#FFFFFF',
-  offWhite: '#F7F8FA',
-  gray100: '#F2F3F5',
-  gray200: '#E4E6EA',
-  gray300: '#CDD0D7',
-  gray400: '#B0B5BE',
-  gray500: '#8A8F9E',
-  gray600: '#636875',
-  gray700: '#4A4F5C',
-  black: '#1A1C22',
-  green: '#22C55E',
-  greenDim: 'rgba(34,197,94,0.10)',
+  offWhite: '#FAFAF9',
+  gray50: '#F5F3F0',
+  gray100: '#EEE9E4',
+  gray200: '#DDD6CF',
+  gray300: '#C0B8AE',
+  gray400: '#A09690',
+  gray500: '#706860',
+  gray700: '#3A332B',
+  black: '#1A1510',
+  green: '#1A9960',
+  greenBg: 'rgba(26,153,96,0.07)',
+  greenText: '#116640',
+  red: '#D93B2B',
 };
 
+interface Ferramenta { codigo: string; nome: string; categoria: string; status: string; }
+interface CartItem extends Ferramenta { qty: number; }
+type NfcPhase = 'idle' | 'reading' | 'done';
+
 // ─── Icons ────────────────────────────────────────────────────────────────────
-const IconWrench = ({ size = 18, color = C.orange }: { size?: number; color?: string }) => (
+const WrenchIcon = ({ size = 18, color = D.orange }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
       stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
-const IconSearch = ({ size = 16, color = C.gray400 }: { size?: number; color?: string }) => (
+const SearchIcon = ({ color = D.gray400, size = 16 }: { color?: string; size?: number }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={2} />
     <Path d="M16.5 16.5L21 21" stroke={color} strokeWidth={2} strokeLinecap="round" />
   </Svg>
 );
 
-const IconX = ({ size = 16, color = C.gray500 }: { size?: number; color?: string }) => (
+const XIcon = ({ size = 13, color = D.gray400 }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M18 6L6 18M6 6l12 12" stroke={color} strokeWidth={2} strokeLinecap="round" />
   </Svg>
 );
 
-const IconReturn = ({ size = 16, color = C.orange }: { size?: number; color?: string }) => (
+const PlusIcon = ({ color = D.white, size = 14 }: { color?: string; size?: number }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M9 9L4 4m0 0l5 5M4 4v5.5A6.5 6.5 0 0 0 10.5 16H20"
-      stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M12 5v14M5 12h14" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
   </Svg>
 );
 
-const IconCheck = ({ size = 20, color = C.green }: { size?: number; color?: string }) => (
+const MinusIcon = ({ color = D.orange, size = 14 }: { color?: string; size?: number }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M5 12h14" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+  </Svg>
+);
+
+const NFCIcon = ({ size = 36, color = D.orange }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x={2} y={2} width={20} height={20} rx={3} stroke={color} strokeWidth={1.5} />
+    <Path d="M8 8.5C9.2 7.3 10.8 6.5 12.6 6.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    <Path d="M6 6.5C7.8 4.7 10.1 3.5 12.6 3.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeOpacity={0.3} />
+    <Circle cx={9.5} cy={14} r={2.5} stroke={color} strokeWidth={1.8} />
+    <Path d="M12 14h6v6l-2-1.5L14 20V14" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+const CheckIcon = ({ size = 28, color = D.green }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M20 6L9 17L4 12" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
-const IconNFC = ({ size = 34, color = C.orange }: { size?: number; color?: string }) => (
+const CartIcon = ({ size = 20, color = D.white }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M20 2H4C2.9 2 2 2.9 2 4V20C2 21.1 2.9 22 4 22H20C21.1 22 22 21.1 22 20V4C22 2.9 21.1 2 20 2Z"
-      stroke={color} strokeWidth={1.5} strokeLinecap="round" />
-    <Path d="M8.5 8.5C9.8 7.2 11.6 6.5 13.5 6.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-    <Path d="M6.5 6.5C8.3 4.7 10.8 3.5 13.5 3.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeOpacity={0.4} />
-    <Circle cx={10} cy={14} r={2.5} stroke={color} strokeWidth={1.8} />
-    <Path d="M12.5 14H18V20L16 18.5L14 20V14" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    <Line x1={3} y1={6} x2={21} y2={6} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    <Path d="M16 10a4 4 0 0 1-8 0" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
-const IconChevronRight = ({ size = 16, color = C.gray300 }: { size?: number; color?: string }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M9 18L15 12L9 6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-  </Svg>
-);
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface Ferramenta {
-  codigo: string;
-  nome: string;
-  categoria: string;
-  status: 'Disponível' | 'Em uso' | 'Em manutenção';
-}
-
-interface EmprestimoAtivo extends Ferramenta {
-  pegouEm: Date;
-  autorizadoPor: string;
-}
-
-type NFCPhase = 'waiting' | 'reading' | 'authorized';
-
-// ─── NFC Pulse ────────────────────────────────────────────────────────────────
-function NFCPulse({ active }: { active: boolean }) {
+// ─── NFC Pulse ──────────────────────────────────────────────────────────────────
+function NFCPulseAnim({ active }: { active: boolean }) {
   const rings = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
-  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  const ref = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     if (active) {
-      const a = Animated.parallel(
+      ref.current = Animated.parallel(
         rings.map((r, i) =>
-          Animated.loop(
-            Animated.sequence([
-              Animated.delay(i * 400),
-              Animated.timing(r, { toValue: 1, duration: 1300, useNativeDriver: true }),
-              Animated.timing(r, { toValue: 0, duration: 0, useNativeDriver: true }),
-            ])
-          )
+          Animated.loop(Animated.sequence([
+            Animated.delay(i * 380),
+            Animated.timing(r, { toValue: 1, duration: 1300, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+            Animated.timing(r, { toValue: 0, duration: 0, useNativeDriver: true }),
+          ]))
         )
       );
-      animRef.current = a;
-      a.start();
+      ref.current.start();
     } else {
-      animRef.current?.stop();
+      ref.current?.stop();
       rings.forEach(r => r.setValue(0));
     }
-    return () => { animRef.current?.stop(); };
+    return () => { ref.current?.stop(); };
   }, [active]);
 
   return (
-    <View style={nfcS.wrapper}>
+    <View style={na.wrap}>
       {rings.map((r, i) => (
-        <Animated.View key={i} style={[nfcS.ring, {
-          transform: [{ scale: r.interpolate({ inputRange: [0, 1], outputRange: [0.6, 2.1] }) }],
-          opacity: r.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 0.38, 0] }),
+        <Animated.View key={i} style={[na.ring, {
+          transform: [{ scale: r.interpolate({ inputRange: [0, 1], outputRange: [0.5, 2.3] }) }],
+          opacity: r.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 0.25, 0] }),
         }]} />
       ))}
-      <View style={nfcS.core}>
-        <IconNFC size={32} color={C.orange} />
+      <View style={na.core}>
+        <NFCIcon size={34} color={D.orange} />
       </View>
     </View>
   );
 }
-const nfcS = StyleSheet.create({
-  wrapper: { width: 110, height: 110, alignItems: 'center', justifyContent: 'center' },
-  ring: { position: 'absolute', width: 88, height: 88, borderRadius: 44, borderWidth: 1.5, borderColor: C.orange },
-  core: { width: 74, height: 74, borderRadius: 37, backgroundColor: C.orangeGhost, borderWidth: 2, borderColor: C.orange + '30', alignItems: 'center', justifyContent: 'center' },
+const na = StyleSheet.create({
+  wrap: { width: 120, height: 120, alignItems: 'center', justifyContent: 'center' },
+  ring: { position: 'absolute', width: 94, height: 94, borderRadius: 47, borderWidth: 1.5, borderColor: D.orange },
+  core: { width: 78, height: 78, borderRadius: 39, backgroundColor: D.orangeDim, borderWidth: 2, borderColor: `${D.orange}22`, alignItems: 'center', justifyContent: 'center' },
 });
 
-// ─── Authorization Modal ──────────────────────────────────────────────────────
+// ─── Toast ──────────────────────────────────────────────────────────────────────
+function Toast({ message, visible }: { message: string; visible: boolean }) {
+  const y = useRef(new Animated.Value(20)).current;
+  const op = useRef(new Animated.Value(0)).current;
+  const sc = useRef(new Animated.Value(0.94)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.spring(y, { toValue: 0, tension: 140, friction: 12, useNativeDriver: true }),
+        Animated.timing(op, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(sc, { toValue: 1, tension: 140, friction: 12, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(y, { toValue: 16, duration: 240, useNativeDriver: true }),
+        Animated.timing(op, { toValue: 0, duration: 240, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible]);
+
+  return (
+    <Animated.View style={[tos.wrap, { opacity: op, transform: [{ translateY: y }, { scale: sc }] }]} pointerEvents="none">
+      <View style={tos.pill}>
+        <View style={tos.iconBox}><CheckIcon size={13} color={D.white} /></View>
+        <Text style={tos.text}>{message}</Text>
+      </View>
+    </Animated.View>
+  );
+}
+const tos = StyleSheet.create({
+  wrap: { position: 'absolute', bottom: 24, left: 20, right: 20, zIndex: 9999 },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: D.black, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 18, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.22, shadowRadius: 16, elevation: 10 },
+  iconBox: { width: 26, height: 26, borderRadius: 13, backgroundColor: D.green, alignItems: 'center', justifyContent: 'center' },
+  text: { fontSize: 14, fontWeight: '600', color: D.white, flex: 1 },
+});
+
+// ─── NFC Authorization Modal ────────────────────────────────────────────────────
 interface AuthModalProps {
   visible: boolean;
   ferramenta: Ferramenta | null;
   onClose: () => void;
-  onAuthorized: (ferramenta: Ferramenta, autorizadoPor: string) => void;
+  onAuthorized: (f: Ferramenta, cracha: string) => void;
 }
 
-function AuthorizationModal({ visible, ferramenta, onClose, onAuthorized }: AuthModalProps) {
-  const [phase, setPhase] = useState<NFCPhase>('waiting');
-  const [crachaManu, setCrachaManu] = useState('');
+function AuthModal({ visible, ferramenta, onClose, onAuthorized }: AuthModalProps) {
+  const [phase, setPhase] = useState<NfcPhase>('idle');
+  const [cracha, setCracha] = useState('');
   const [showManual, setShowManual] = useState(false);
   const [tagRead, setTagRead] = useState('');
 
   const slideY = useRef(new Animated.Value(500)).current;
-  const bgOpacity = useRef(new Animated.Value(0)).current;
-  const successScale = useRef(new Animated.Value(0)).current;
+  const bgOp = useRef(new Animated.Value(0)).current;
+  const successSc = useRef(new Animated.Value(0)).current;
   const manualH = useRef(new Animated.Value(0)).current;
+  const btnScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     if (visible) {
-      setPhase('waiting');
-      setCrachaManu('');
-      setShowManual(false);
-      setTagRead('');
-      manualH.setValue(0);
-      successScale.setValue(0);
-
+      setPhase('idle'); setCracha(''); setShowManual(false); setTagRead('');
+      manualH.setValue(0); successSc.setValue(0);
       Animated.parallel([
-        Animated.spring(slideY, { toValue: 0, useNativeDriver: true, tension: 72, friction: 13 }),
-        Animated.timing(bgOpacity, { toValue: 1, duration: 280, useNativeDriver: true }),
+        Animated.spring(slideY, { toValue: 0, tension: 72, friction: 13, useNativeDriver: true }),
+        Animated.timing(bgOp, { toValue: 1, duration: 280, useNativeDriver: true }),
       ]).start(() => startNFC());
     } else {
-      slideY.setValue(500);
-      bgOpacity.setValue(0);
+      slideY.setValue(500); bgOp.setValue(0);
     }
   }, [visible]);
 
   const startNFC = async () => {
     setPhase('reading');
     try {
-      const result = await nfcService.readTag();
-      if (result.success && result.data) {
-        setTagRead(result.data);
-        setPhase('authorized');
-        Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 140, friction: 8 }).start();
-      } else {
-        setPhase('waiting');
-      }
-    } catch {
-      setPhase('waiting');
-    }
+      const r = await nfcService.readTag();
+      if (r.success && r.data) {
+        setTagRead(r.data); setPhase('done');
+        Animated.spring(successSc, { toValue: 1, tension: 150, friction: 9, useNativeDriver: true }).start();
+      } else setPhase('idle');
+    } catch { setPhase('idle'); }
   };
 
   const dismiss = () => {
     nfcService.stop();
     Animated.parallel([
       Animated.timing(slideY, { toValue: 500, duration: 260, useNativeDriver: true }),
-      Animated.timing(bgOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+      Animated.timing(bgOp, { toValue: 0, duration: 220, useNativeDriver: true }),
     ]).start(() => onClose());
   };
 
   const toggleManual = () => {
-    const next = !showManual;
-    setShowManual(next);
+    const next = !showManual; setShowManual(next);
     Animated.spring(manualH, { toValue: next ? 1 : 0, useNativeDriver: false, tension: 100, friction: 12 }).start();
-    if (!next) { setCrachaManu(''); Keyboard.dismiss(); }
+    if (!next) { setCracha(''); Keyboard.dismiss(); }
   };
 
   const confirmManual = () => {
-    if (!crachaManu.trim()) return;
+    if (!cracha.trim()) return;
     Keyboard.dismiss();
-    setTagRead(crachaManu.trim());
-    setPhase('authorized');
-    Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 140, friction: 8 }).start();
+    setTagRead(cracha.trim()); setPhase('done');
+    Animated.spring(successSc, { toValue: 1, tension: 150, friction: 9, useNativeDriver: true }).start();
   };
 
   const confirmRetirada = () => {
     if (!ferramenta) return;
+    Animated.sequence([
+      Animated.timing(btnScale, { toValue: 0.97, duration: 65, useNativeDriver: true }),
+      Animated.spring(btnScale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
+    ]).start();
     dismiss();
     setTimeout(() => onAuthorized(ferramenta, tagRead), 320);
   };
 
-  const manualHeight = manualH.interpolate({ inputRange: [0, 1], outputRange: [0, 90] });
-  const manualOpacity = manualH.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0, 1] });
+  const manualHeight = manualH.interpolate({ inputRange: [0, 1], outputRange: [0, 94] });
+  const manualOp = manualH.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0, 1] });
 
   if (!ferramenta) return null;
 
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={dismiss}>
-      <Animated.View style={[mS.backdrop, { opacity: bgOpacity }]}>
+      <Animated.View style={[am.backdrop, { opacity: bgOp }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={dismiss} />
       </Animated.View>
 
-      <Animated.View style={[mS.sheet, { transform: [{ translateY: slideY }] }]}>
-        <View style={mS.handle} />
+      <Animated.View style={[am.sheet, { transform: [{ translateY: slideY }] }]}>
+        <View style={am.handle} />
 
-        {/* Tool info row */}
-        <View style={mS.toolRow}>
-          <View style={mS.toolIcon}>
-            <IconWrench size={20} color={C.orange} />
-          </View>
+        {/* Tool info */}
+        <View style={am.toolRow}>
+          <View style={am.toolIcon}><WrenchIcon size={20} color={D.orange} /></View>
           <View style={{ flex: 1 }}>
-            <Text style={mS.toolName} numberOfLines={1}>{ferramenta.nome}</Text>
-            <Text style={mS.toolMeta}>{ferramenta.categoria} · {ferramenta.codigo}</Text>
+            <Text style={am.toolName} numberOfLines={1}>{ferramenta.nome}</Text>
+            <Text style={am.toolMeta}>{ferramenta.categoria} · {ferramenta.codigo}</Text>
           </View>
-          <TouchableOpacity onPress={dismiss} style={mS.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <IconX size={16} color={C.gray500} />
+          <TouchableOpacity onPress={dismiss} style={am.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <XIcon size={13} />
           </TouchableOpacity>
         </View>
-        <View style={mS.divider} />
+        <View style={am.sep} />
 
-        {/* ── Waiting / Reading ── */}
-        {phase !== 'authorized' && (
-          <View style={mS.body}>
-            <NFCPulse active={phase === 'reading'} />
-
-            <View style={mS.textBlock}>
-              <Text style={mS.phaseTitle}>
-                {phase === 'reading' ? 'Aguardando crachá...' : 'Autorização necessária'}
+        {/* Idle / Reading */}
+        {phase !== 'done' && (
+          <View style={am.body}>
+            <NFCPulseAnim active={phase === 'reading'} />
+            <View style={{ alignItems: 'center', gap: 6 }}>
+              <Text style={am.title}>
+                {phase === 'reading' ? 'Aguardando crachá NFC…' : 'Autorização necessária'}
               </Text>
-              <Text style={mS.phaseDesc}>
-                O almoxarife deve aproximar o crachá{'\n'}NFC para liberar a retirada
-              </Text>
+              <Text style={am.sub}>Almoxarife deve aproximar o crachá{'\n'}para autorizar a retirada</Text>
             </View>
 
-            {phase === 'waiting' && (
-              <TouchableOpacity style={mS.primaryBtn} onPress={startNFC} activeOpacity={0.85}>
-                <Text style={mS.primaryBtnText}>Iniciar leitura NFC</Text>
+            {phase === 'idle' && (
+              <TouchableOpacity style={am.primaryBtn} onPress={startNFC} activeOpacity={0.87}>
+                <NFCIcon size={18} color={D.white} />
+                <Text style={am.primaryBtnText}>Iniciar leitura NFC</Text>
               </TouchableOpacity>
             )}
 
-            {/* Manual fallback */}
-            <TouchableOpacity style={mS.manualToggleBtn} onPress={toggleManual} activeOpacity={0.7}>
-              <Text style={mS.manualToggleText}>
-                {showManual ? 'Cancelar entrada manual' : 'Inserir crachá manualmente'}
-              </Text>
+            <TouchableOpacity style={am.linkBtn} onPress={toggleManual} activeOpacity={0.7}>
+              <Text style={am.linkText}>{showManual ? '← Cancelar entrada manual' : 'Inserir crachá manualmente'}</Text>
             </TouchableOpacity>
 
-            <Animated.View style={{ height: manualHeight, opacity: manualOpacity, width: '100%', overflow: 'hidden' }}>
-              <View style={mS.manualRow}>
-                <TextInput
-                  style={mS.manualInput}
-                  placeholder="Número do crachá do almoxarife"
-                  placeholderTextColor={C.gray400}
-                  value={crachaManu}
-                  onChangeText={setCrachaManu}
-                  keyboardType="numeric"
-                  autoCorrect={false}
-                  returnKeyType="done"
-                  onSubmitEditing={confirmManual}
-                />
+            <Animated.View style={{ height: manualHeight, opacity: manualOp, width: '100%', overflow: 'hidden' }}>
+              <View style={am.manualRow}>
+                <View style={am.manualInput}>
+                  <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                    <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
+                    <Circle cx={9} cy={12} r={2.5} stroke={D.orange} strokeWidth={1.6} />
+                    <Path d="M14 10h4M14 14h3" stroke={D.orange} strokeWidth={1.5} strokeLinecap="round" />
+                  </Svg>
+                  <TextInput
+                    style={am.manualField}
+                    placeholder="Nº do crachá"
+                    placeholderTextColor={D.gray300}
+                    value={cracha}
+                    onChangeText={setCracha}
+                    keyboardType="numeric"
+                    autoCorrect={false}
+                    returnKeyType="done"
+                    onSubmitEditing={confirmManual}
+                  />
+                </View>
                 <TouchableOpacity
-                  style={[mS.manualOkBtn, !crachaManu.trim() && mS.manualOkBtnDisabled]}
+                  style={[am.manualOk, !cracha.trim() && am.manualOkDisabled]}
                   onPress={confirmManual}
-                  activeOpacity={0.8}
-                  disabled={!crachaManu.trim()}
+                  disabled={!cracha.trim()}
+                  activeOpacity={0.85}
                 >
-                  <Text style={mS.manualOkText}>OK</Text>
+                  <Text style={am.manualOkText}>OK</Text>
                 </TouchableOpacity>
               </View>
             </Animated.View>
           </View>
         )}
 
-        {/* ── Authorized ── */}
-        {phase === 'authorized' && (
-          <View style={mS.body}>
-            <Animated.View style={[mS.successCircle, { transform: [{ scale: successScale }] }]}>
-              <IconCheck size={34} color={C.green} />
+        {/* Authorized */}
+        {phase === 'done' && (
+          <View style={am.body}>
+            <Animated.View style={[am.successCircle, { transform: [{ scale: successSc }] }]}>
+              <CheckIcon size={36} color={D.green} />
             </Animated.View>
-
-            <View style={mS.textBlock}>
-              <Text style={[mS.phaseTitle, { color: C.green }]}>Autorizado!</Text>
-              <Text style={mS.phaseDesc}>
-                Crachá <Text style={{ fontWeight: '700', color: C.black }}>{tagRead}</Text> verificado.{'\n'}
+            <View style={{ alignItems: 'center', gap: 6 }}>
+              <Text style={[am.title, { color: D.green }]}>Autorizado!</Text>
+              <Text style={am.sub}>
+                Crachá <Text style={{ fontWeight: '800', color: D.black }}>{tagRead}</Text> verificado.{'\n'}
                 Confirme para registrar a retirada.
               </Text>
             </View>
-
-            <TouchableOpacity style={mS.primaryBtn} onPress={confirmRetirada} activeOpacity={0.85}>
-              <Text style={mS.primaryBtnText}>Confirmar Retirada</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={dismiss} style={mS.cancelBtn}>
-              <Text style={mS.cancelBtnText}>Cancelar</Text>
+            <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }] }}>
+              <TouchableOpacity style={am.primaryBtn} onPress={confirmRetirada} activeOpacity={0.87}>
+                <CheckIcon size={18} color={D.white} />
+                <Text style={am.primaryBtnText}>Confirmar Retirada</Text>
+              </TouchableOpacity>
+            </Animated.View>
+            <TouchableOpacity onPress={dismiss} style={am.cancelBtn}>
+              <Text style={am.cancelText}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -351,132 +374,120 @@ function AuthorizationModal({ visible, ferramenta, onClose, onAuthorized }: Auth
     </Modal>
   );
 }
-
-const mS = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.48)' },
+const am = StyleSheet.create({
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(26,21,16,0.52)' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: C.white,
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    paddingBottom: Platform.OS === 'ios' ? 48 : 36,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 20,
+    backgroundColor: D.white, borderTopLeftRadius: 30, borderTopRightRadius: 30,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 36,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 20,
   },
-  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: C.gray200, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
-
-  toolRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingVertical: 16 },
-  toolIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
-  toolName: { fontSize: 15, fontWeight: '700', color: C.black },
-  toolMeta: { fontSize: 12, color: C.gray500, marginTop: 2 },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: C.gray100, alignItems: 'center', justifyContent: 'center' },
-  divider: { height: 1, backgroundColor: C.gray100 },
-
-  body: { paddingHorizontal: 24, paddingTop: 28, alignItems: 'center', gap: 16, minHeight: 310 },
-  textBlock: { alignItems: 'center', gap: 6 },
-  phaseTitle: { fontSize: 20, fontWeight: '800', color: C.black, letterSpacing: -0.3, textAlign: 'center' },
-  phaseDesc: { fontSize: 14, color: C.gray500, textAlign: 'center', lineHeight: 22 },
-
+  handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: D.gray200, alignSelf: 'center', marginTop: 12, marginBottom: 6 },
+  toolRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingVertical: 14 },
+  toolIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
+  toolName: { fontSize: 15, fontWeight: '800', color: D.black },
+  toolMeta: { fontSize: 12, color: D.gray500, marginTop: 2 },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: D.gray100, alignItems: 'center', justifyContent: 'center' },
+  sep: { height: 1, backgroundColor: D.gray100 },
+  body: { paddingHorizontal: 24, paddingTop: 26, alignItems: 'center', gap: 16, minHeight: 320 },
+  title: { fontSize: 21, fontWeight: '900', color: D.black, letterSpacing: -0.3, textAlign: 'center' },
+  sub: { fontSize: 14, color: D.gray500, textAlign: 'center', lineHeight: 22 },
   primaryBtn: {
-    width: '100%', height: 52, borderRadius: 16, backgroundColor: C.orange,
-    alignItems: 'center', justifyContent: 'center', marginTop: 4,
-    shadowColor: C.orangeDark, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.28, shadowRadius: 10, elevation: 4,
+    width: '100%', height: 58, borderRadius: 16, backgroundColor: D.orange,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6,
   },
-  primaryBtnText: { fontSize: 16, fontWeight: '700', color: C.white, letterSpacing: 0.2 },
-
-  manualToggleBtn: { paddingVertical: 6 },
-  manualToggleText: { fontSize: 13, color: C.orange, fontWeight: '600' },
-  manualRow: { flexDirection: 'row', gap: 8, paddingTop: 10 },
-  manualInput: { flex: 1, height: 48, backgroundColor: C.gray100, borderRadius: 12, borderWidth: 1.5, borderColor: C.gray200, paddingHorizontal: 14, fontSize: 15, color: C.black },
-  manualOkBtn: { width: 58, height: 48, borderRadius: 12, backgroundColor: C.orange, alignItems: 'center', justifyContent: 'center' },
-  manualOkBtnDisabled: { backgroundColor: C.gray200 },
-  manualOkText: { fontSize: 14, fontWeight: '800', color: C.white },
-
-  successCircle: { width: 84, height: 84, borderRadius: 42, backgroundColor: C.greenDim, borderWidth: 2, borderColor: C.green + '40', alignItems: 'center', justifyContent: 'center' },
-  cancelBtn: { paddingVertical: 10 },
-  cancelBtnText: { fontSize: 14, color: C.gray400, fontWeight: '500' },
+  primaryBtnText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
+  linkBtn: { paddingVertical: 6 },
+  linkText: { fontSize: 13, color: D.orange, fontWeight: '600' },
+  manualRow: { flexDirection: 'row', gap: 10, paddingTop: 10 },
+  manualInput: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, height: 52, backgroundColor: D.gray50, borderRadius: 13, borderWidth: 1.5, borderColor: D.gray200, paddingHorizontal: 14 },
+  manualField: { flex: 1, fontSize: 15, color: D.black, fontWeight: '500' },
+  manualOk: { width: 60, height: 52, borderRadius: 13, backgroundColor: D.orange, alignItems: 'center', justifyContent: 'center' },
+  manualOkDisabled: { backgroundColor: D.gray200 },
+  manualOkText: { fontSize: 15, fontWeight: '800', color: D.white },
+  successCircle: { width: 86, height: 86, borderRadius: 43, backgroundColor: D.greenBg, borderWidth: 2, borderColor: `${D.green}35`, alignItems: 'center', justifyContent: 'center' },
+  cancelBtn: { paddingVertical: 8 },
+  cancelText: { fontSize: 13, color: D.gray400, fontWeight: '500' },
 });
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-function Toast({ message, visible }: { message: string; visible: boolean }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(14)).current;
-
-  useEffect(() => {
-    if (visible) {
-      Animated.parallel([
-        Animated.spring(translateY, { toValue: 0, useNativeDriver: true, tension: 130, friction: 10 }),
-        Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(translateY, { toValue: 14, duration: 250, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0, duration: 250, useNativeDriver: true }),
-      ]).start();
-    }
-  }, [visible]);
-
-  return (
-    <Animated.View style={[tS.wrap, { opacity, transform: [{ translateY }] }]} pointerEvents="none">
-      <View style={tS.pill}>
-        <View style={tS.dot} />
-        <Text style={tS.text}>{message}</Text>
-      </View>
-    </Animated.View>
-  );
-}
-const tS = StyleSheet.create({
-  wrap: { position: 'absolute', bottom: 28, left: 24, right: 24, zIndex: 9999 },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.black, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 18, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 12, elevation: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
-  text: { fontSize: 14, fontWeight: '600', color: C.white },
-});
-
-// ─── Emprestimo Card ──────────────────────────────────────────────────────────
-function EmprestimoCard({ item, index, onReturn }: { item: EmprestimoAtivo; index: number; onReturn: (c: string) => void }) {
-  const ox = useRef(new Animated.Value(-24)).current;
+// ─── Cart Item ─────────────────────────────────────────────────────────────────
+function CartCard({ item, onRemove, onQtyChange, index }: {
+  item: CartItem;
+  onRemove: (c: string) => void;
+  onQtyChange: (c: string, d: number) => void;
+  index: number;
+}) {
+  const oy = useRef(new Animated.Value(-10)).current;
   const op = useRef(new Animated.Value(0)).current;
+  const qtyScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.spring(ox, { toValue: 0, useNativeDriver: true, delay: index * 50, tension: 100, friction: 13 }),
-      Animated.timing(op, { toValue: 1, duration: 240, delay: index * 50, useNativeDriver: true }),
+      Animated.spring(oy, { toValue: 0, tension: 120, friction: 13, useNativeDriver: true }),
+      Animated.timing(op, { toValue: 1, duration: 200, useNativeDriver: true }),
     ]).start();
   }, []);
 
-  const mins = Math.round((Date.now() - item.pegouEm.getTime()) / 60000);
-  const since = mins < 1 ? 'agora mesmo' : mins === 1 ? '1 min atrás' : `${mins} min atrás`;
+  const animateQty = () => {
+    Animated.sequence([
+      Animated.timing(qtyScale, { toValue: 1.3, duration: 80, useNativeDriver: true }),
+      Animated.spring(qtyScale, { toValue: 1, tension: 260, friction: 10, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const changeQty = (d: number) => {
+    animateQty();
+    onQtyChange(item.codigo, d);
+  };
 
   return (
-    <Animated.View style={[eS.wrap, { opacity: op, transform: [{ translateX: ox }] }]}>
-      <View style={eS.card}>
-        <View style={eS.accent} />
-        <View style={eS.icon}>
-          <IconWrench size={15} color={C.orange} />
+    <Animated.View style={[cc.wrap, { opacity: op, transform: [{ translateY: oy }] }]}>
+      <View style={cc.card}>
+        <View style={cc.left}>
+          <View style={cc.iconBox}><WrenchIcon size={16} color={D.orange} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={cc.name} numberOfLines={1}>{item.nome}</Text>
+            <Text style={cc.meta}>{item.codigo} · {item.categoria}</Text>
+          </View>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={eS.name} numberOfLines={1}>{item.nome}</Text>
-          <Text style={eS.meta}>{item.codigo} · {since}</Text>
+        <View style={cc.right}>
+          <TouchableOpacity style={cc.qtyBtn} onPress={() => changeQty(-1)} activeOpacity={0.7}>
+            <MinusIcon size={13} color={D.orange} />
+          </TouchableOpacity>
+          <Animated.Text style={[cc.qty, { transform: [{ scale: qtyScale }] }]}>{item.qty}</Animated.Text>
+          <TouchableOpacity style={[cc.qtyBtn, cc.qtyBtnPlus]} onPress={() => changeQty(1)} activeOpacity={0.7}>
+            <PlusIcon size={13} color={D.white} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => onRemove(item.codigo)} style={cc.removeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <XIcon size={12} color={D.gray400} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity style={eS.returnBtn} onPress={() => onReturn(item.codigo)} activeOpacity={0.75}>
-          <IconReturn size={13} color={C.orange} />
-          <Text style={eS.returnText}>Devolver</Text>
-        </TouchableOpacity>
       </View>
     </Animated.View>
   );
 }
-const eS = StyleSheet.create({
+const cc = StyleSheet.create({
   wrap: { marginBottom: 8 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.white, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: C.gray200, overflow: 'hidden' },
-  accent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3.5, backgroundColor: C.orange, borderTopLeftRadius: 14, borderBottomLeftRadius: 14 },
-  icon: { width: 36, height: 36, borderRadius: 9, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
-  name: { fontSize: 13, fontWeight: '700', color: C.black },
-  meta: { fontSize: 11, color: C.gray500, marginTop: 2 },
-  returnBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 9, backgroundColor: C.orangeGhost, borderWidth: 1, borderColor: C.orange + '30' },
-  returnText: { fontSize: 11, fontWeight: '700', color: C.orange },
+  card: {
+    backgroundColor: D.white, borderRadius: 14,
+    borderWidth: 1.5, borderColor: D.gray200,
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 11, paddingHorizontal: 12, gap: 10,
+  },
+  left: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
+  name: { fontSize: 13, fontWeight: '700', color: D.black },
+  meta: { fontSize: 11, color: D.gray500, marginTop: 2 },
+  right: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  qtyBtn: { width: 28, height: 28, borderRadius: 8, borderWidth: 1.5, borderColor: D.orange + '60', alignItems: 'center', justifyContent: 'center' },
+  qtyBtnPlus: { backgroundColor: D.orange, borderColor: D.orange },
+  qty: { fontSize: 15, fontWeight: '800', color: D.black, minWidth: 20, textAlign: 'center' },
+  removeBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: D.gray100, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
 });
 
-// ─── Ferramenta Row ───────────────────────────────────────────────────────────
-function FerramentaRow({ item, index, onPress }: { item: Ferramenta; index: number; onPress: (f: Ferramenta) => void }) {
+// ─── Tool Row (available) ──────────────────────────────────────────────────────
+function AvailableRow({ item, index, onPress }: { item: Ferramenta; index: number; onPress: (f: Ferramenta) => void }) {
   const oy = useRef(new Animated.Value(10)).current;
   const op = useRef(new Animated.Value(0)).current;
   const sc = useRef(new Animated.Value(1)).current;
@@ -484,125 +495,316 @@ function FerramentaRow({ item, index, onPress }: { item: Ferramenta; index: numb
   useEffect(() => {
     Animated.parallel([
       Animated.timing(op, { toValue: 1, duration: 200, delay: index * 30, useNativeDriver: true }),
-      Animated.spring(oy, { toValue: 0, useNativeDriver: true, delay: index * 30, tension: 120, friction: 14 }),
+      Animated.spring(oy, { toValue: 0, tension: 120, friction: 14, delay: index * 30, useNativeDriver: true }),
     ]).start();
   }, []);
 
-  const handlePress = () => {
+  const press = () => {
     Animated.sequence([
-      Animated.timing(sc, { toValue: 0.975, duration: 70, useNativeDriver: true }),
-      Animated.spring(sc, { toValue: 1, useNativeDriver: true, tension: 220, friction: 10 }),
+      Animated.timing(sc, { toValue: 0.975, duration: 60, useNativeDriver: true }),
+      Animated.spring(sc, { toValue: 1, tension: 260, friction: 10, useNativeDriver: true }),
     ]).start();
     onPress(item);
   };
 
   return (
-    <Animated.View style={[fS.wrap, { opacity: op, transform: [{ translateY: oy }, { scale: sc }] }]}>
-      <TouchableOpacity style={fS.card} onPress={handlePress} activeOpacity={1}>
-        <View style={fS.icon}>
-          <IconWrench size={17} color={C.orange} />
-        </View>
+    <Animated.View style={[ar.wrap, { opacity: op, transform: [{ translateY: oy }, { scale: sc }] }]}>
+      <TouchableOpacity style={ar.card} onPress={press} activeOpacity={1}>
+        <View style={ar.iconBox}><WrenchIcon size={16} color={D.orange} /></View>
         <View style={{ flex: 1 }}>
-          <Text style={fS.name} numberOfLines={1}>{item.nome}</Text>
-          <Text style={fS.cat}>{item.categoria}</Text>
+          <Text style={ar.name} numberOfLines={1}>{item.nome}</Text>
+          <Text style={ar.meta}>{item.categoria}</Text>
         </View>
-        <View style={fS.right}>
-          <Text style={fS.code}>{item.codigo}</Text>
-          <View style={fS.freeBadge}>
-            <View style={fS.freeDot} />
-            <Text style={fS.freeText}>Livre</Text>
+        <View style={ar.right}>
+          <Text style={ar.code}>{item.codigo}</Text>
+          <View style={ar.freeBadge}>
+            <View style={ar.freeDot} />
+            <Text style={ar.freeText}>Livre</Text>
           </View>
         </View>
-        <IconChevronRight size={16} color={C.gray300} />
+        <View style={ar.addBtn}>
+          <PlusIcon size={13} color={D.white} />
+        </View>
       </TouchableOpacity>
     </Animated.View>
   );
 }
-const fS = StyleSheet.create({
+const ar = StyleSheet.create({
   wrap: { marginBottom: 6 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.white, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 14, borderWidth: 1, borderColor: C.gray200 },
-  icon: { width: 40, height: 40, borderRadius: 10, backgroundColor: C.orangeGhost, alignItems: 'center', justifyContent: 'center' },
-  name: { fontSize: 14, fontWeight: '700', color: C.black },
-  cat: { fontSize: 12, color: C.gray500, marginTop: 2 },
+  card: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: D.white, borderRadius: 14,
+    paddingVertical: 12, paddingHorizontal: 13,
+    borderWidth: 1, borderColor: D.gray200,
+  },
+  iconBox: { width: 40, height: 40, borderRadius: 10, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
+  name: { fontSize: 13, fontWeight: '700', color: D.black },
+  meta: { fontSize: 11, color: D.gray500, marginTop: 2 },
   right: { alignItems: 'flex-end', gap: 4 },
-  code: { fontSize: 11, color: C.gray400, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
-  freeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.greenDim, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 50 },
-  freeDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: C.green },
-  freeText: { fontSize: 10, fontWeight: '700', color: C.green },
+  code: { fontSize: 10, color: D.gray400, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  freeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: D.greenBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 99 },
+  freeDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: D.green },
+  freeText: { fontSize: 10, fontWeight: '700', color: D.greenText },
+  addBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: D.orange, alignItems: 'center', justifyContent: 'center' },
 });
 
-// ─── Section Label ────────────────────────────────────────────────────────────
-function SectionLabel({ label, count, accentColor }: { label: string; count: number; accentColor?: string }) {
-  const color = accentColor || C.gray500;
+// ─── Section Header ────────────────────────────────────────────────────────────
+function SectionHeader({ label, count, color = D.gray500 }: { label: string; count: number; color?: string }) {
   return (
-    <View style={slS.row}>
-      <View style={[slS.bar, { backgroundColor: color }]} />
-      <Text style={slS.label}>{label}</Text>
-      <View style={[slS.badge, { backgroundColor: color + '18' }]}>
-        <Text style={[slS.badgeNum, { color }]}>{count}</Text>
+    <View style={sh.row}>
+      <View style={[sh.bar, { backgroundColor: color }]} />
+      <Text style={sh.label}>{label}</Text>
+      <View style={[sh.badge, { backgroundColor: `${color}18` }]}>
+        <Text style={[sh.badgeNum, { color }]}>{count}</Text>
       </View>
     </View>
   );
 }
-const slS = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  bar: { width: 3, height: 14, borderRadius: 2 },
-  label: { fontSize: 11, fontWeight: '800', color: C.gray500, letterSpacing: 1.1, textTransform: 'uppercase', flex: 1 },
-  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 50 },
-  badgeNum: { fontSize: 11, fontWeight: '700' },
+const sh = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 11, marginTop: 4 },
+  bar: { width: 3.5, height: 15, borderRadius: 2 },
+  label: { flex: 1, fontSize: 10, fontWeight: '800', color: D.gray500, letterSpacing: 1.2, textTransform: 'uppercase' },
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99 },
+  badgeNum: { fontSize: 11, fontWeight: '800' },
 });
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+// ─── Cart FAB ──────────────────────────────────────────────────────────────────
+function CartFAB({ count, onPress, anim }: { count: number; onPress: () => void; anim: Animated.Value }) {
+  const sc = anim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+  const ty = anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
+  return (
+    <Animated.View style={[fab.wrap, { transform: [{ scale: sc }, { translateY: ty }], opacity: anim }]}>
+      <TouchableOpacity style={fab.btn} onPress={onPress} activeOpacity={0.87}>
+        <CartIcon size={20} color={D.white} />
+        <Text style={fab.label}>{count} {count === 1 ? 'item' : 'itens'} no carrinho</Text>
+        <View style={fab.arrow}>
+          <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+            <Path d="M5 12h14M12 5l7 7-7 7" stroke={D.white} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+const fab = StyleSheet.create({
+  wrap: { position: 'absolute', bottom: 28, left: 20, right: 20, zIndex: 200 },
+  btn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: D.orange, borderRadius: 18, paddingVertical: 16, paddingHorizontal: 20,
+    shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.38, shadowRadius: 18, elevation: 10,
+  },
+  label: { flex: 1, fontSize: 15, fontWeight: '800', color: D.white, letterSpacing: 0.1 },
+  arrow: { width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+});
+
+// ─── Cart Summary Modal ────────────────────────────────────────────────────────
+function CartModal({ visible, cart, onClose, onConfirm, loading }: {
+  visible: boolean; cart: CartItem[];
+  onClose: () => void; onConfirm: (cracha: string) => void; loading: boolean;
+}) {
+  const [cracha, setCracha] = useState('');
+  const slideY = useRef(new Animated.Value(600)).current;
+  const bgOp = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setCracha('');
+      Animated.parallel([
+        Animated.spring(slideY, { toValue: 0, tension: 68, friction: 13, useNativeDriver: true }),
+        Animated.timing(bgOp, { toValue: 1, duration: 260, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideY, { toValue: 600, duration: 250, useNativeDriver: true }),
+        Animated.timing(bgOp, { toValue: 0, duration: 210, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const close = () => {
+    Animated.parallel([
+      Animated.timing(slideY, { toValue: 600, duration: 250, useNativeDriver: true }),
+      Animated.timing(bgOp, { toValue: 0, duration: 210, useNativeDriver: true }),
+    ]).start(() => onClose());
+  };
+
+  const totalQty = cart.reduce((a, c) => a + c.qty, 0);
+
+  return (
+    <Modal transparent visible={visible} animationType="none" onRequestClose={close}>
+      <Animated.View style={[cm.backdrop, { opacity: bgOp }]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={close} />
+      </Animated.View>
+      <Animated.View style={[cm.sheet, { transform: [{ translateY: slideY }] }]}>
+        <View style={cm.handle} />
+        <View style={cm.header}>
+          <View style={cm.headerLeft}>
+            <CartIcon size={20} color={D.orange} />
+            <Text style={cm.headerTitle}>Confirmar Retirada</Text>
+          </View>
+          <View style={cm.countBadge}>
+            <Text style={cm.countText}>{totalQty} {totalQty === 1 ? 'item' : 'itens'}</Text>
+          </View>
+        </View>
+        <View style={cm.sep} />
+
+        <ScrollView style={{ maxHeight: 200 }} contentContainerStyle={{ paddingHorizontal: 22, paddingVertical: 14 }} showsVerticalScrollIndicator={false}>
+          {cart.map(item => (
+            <View key={item.codigo} style={cm.itemRow}>
+              <WrenchIcon size={14} color={D.orange} />
+              <Text style={cm.itemName} numberOfLines={1}>{item.nome}</Text>
+              <Text style={cm.itemQty}>×{item.qty}</Text>
+            </View>
+          ))}
+        </ScrollView>
+
+        <View style={cm.sep} />
+        <View style={cm.form}>
+          <Text style={cm.formLabel}>Crachá do Colaborador</Text>
+          <View style={cm.inputWrap}>
+            <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+              <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
+              <Circle cx={9} cy={12} r={2.5} stroke={D.orange} strokeWidth={1.6} />
+              <Path d="M14 10h4M14 14h3" stroke={D.orange} strokeWidth={1.5} strokeLinecap="round" />
+            </Svg>
+            <TextInput
+              style={cm.input}
+              placeholder="Número do crachá"
+              placeholderTextColor={D.gray300}
+              value={cracha}
+              onChangeText={setCracha}
+              keyboardType="numeric"
+              autoCorrect={false}
+            />
+          </View>
+          <TouchableOpacity
+            style={[cm.confirmBtn, (!cracha.trim() || loading) && cm.confirmBtnDisabled]}
+            onPress={() => onConfirm(cracha.trim())}
+            disabled={!cracha.trim() || loading}
+            activeOpacity={0.87}
+          >
+            {loading
+              ? <ActivityIndicator color={D.white} size="small" />
+              : (
+                <>
+                  <Text style={[cm.confirmText, (!cracha.trim() || loading) && cm.confirmTextDisabled]}>
+                    Registrar Retirada
+                  </Text>
+                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                    <Path d="M5 12h14M12 5l7 7-7 7" stroke={(!cracha.trim() || loading) ? D.gray400 : D.white} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+                  </Svg>
+                </>
+              )
+            }
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    </Modal>
+  );
+}
+const cm = StyleSheet.create({
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(26,21,16,0.52)' },
+  sheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: D.white, borderTopLeftRadius: 30, borderTopRightRadius: 30,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 30,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 20,
+  },
+  handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: D.gray200, alignSelf: 'center', marginTop: 12, marginBottom: 6 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 22, paddingVertical: 14 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerTitle: { fontSize: 18, fontWeight: '900', color: D.black },
+  countBadge: { backgroundColor: D.orangeDim, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 },
+  countText: { fontSize: 12, fontWeight: '700', color: D.orange },
+  sep: { height: 1, backgroundColor: D.gray100 },
+  itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: D.gray100 },
+  itemName: { flex: 1, fontSize: 13, fontWeight: '600', color: D.black },
+  itemQty: { fontSize: 13, fontWeight: '800', color: D.orange },
+  form: { paddingHorizontal: 22, paddingTop: 18, gap: 12 },
+  formLabel: { fontSize: 12, fontWeight: '700', color: D.gray500, letterSpacing: 0.5, textTransform: 'uppercase' },
+  inputWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    height: 54, borderRadius: 14, borderWidth: 1.5, borderColor: D.gray200,
+    backgroundColor: D.gray50, paddingHorizontal: 16,
+  },
+  input: { flex: 1, fontSize: 15, color: D.black, fontWeight: '500' },
+  confirmBtn: {
+    height: 58, borderRadius: 16, backgroundColor: D.orange,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6,
+  },
+  confirmBtnDisabled: { backgroundColor: D.gray200, shadowOpacity: 0 },
+  confirmText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
+  confirmTextDisabled: { color: D.gray400 },
+});
+
+// ─── Main Screen ───────────────────────────────────────────────────────────────
 export default function AlmoxarifadoScreen() {
   const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
-  const [emprestimos, setEmprestimos] = useState<EmprestimoAtivo[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
   const [query, setQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [selectedFerr, setSelectedFerr] = useState<Ferramenta | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [toast, setToast] = useState({ visible: false, message: '' });
+  const [loading, setLoading] = useState(true);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [selected, setSelected] = useState<Ferramenta | null>(null);
+  const [authModal, setAuthModal] = useState(false);
+  const [cartModal, setCartModal] = useState(false);
+  const [toast, setToast] = useState({ visible: false, msg: '' });
 
-  useEffect(() => { loadFerramentas(); }, []);
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const fabAnim = useRef(new Animated.Value(0)).current;
 
-  const loadFerramentas = async () => {
+  useEffect(() => {
+    Animated.timing(headerAnim, { toValue: 1, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    load();
+  }, []);
+
+  useEffect(() => {
+    Animated.spring(fabAnim, { toValue: cart.length > 0 ? 1 : 0, tension: 120, friction: 12, useNativeDriver: true }).start();
+  }, [cart.length]);
+
+  const load = async () => {
     try {
-      setIsLoading(true);
+      setLoading(true);
       const data = await apiClient.listarFerramentas();
       setFerramentas((data || []).filter((f: Ferramenta) => f.status === 'Disponível'));
-    } catch {
-      setFerramentas([]);
+    } catch { setFerramentas([]); }
+    finally { setLoading(false); }
+  };
+
+  const addToCart = useCallback((f: Ferramenta, cracha: string) => {
+    setCart(prev => {
+      const ex = prev.find(c => c.codigo === f.codigo);
+      if (ex) return prev.map(c => c.codigo === f.codigo ? { ...c, qty: c.qty + 1 } : c);
+      return [{ ...f, qty: 1 }, ...prev];
+    });
+    showToast(`${f.nome} adicionada!`);
+  }, []);
+
+  const removeFromCart = (codigo: string) => setCart(prev => prev.filter(c => c.codigo !== codigo));
+  const changeQty = (codigo: string, d: number) =>
+    setCart(prev => prev.map(c => c.codigo === codigo ? { ...c, qty: Math.max(1, c.qty + d) } : c));
+
+  const submitRetirada = async (crachColaborador: string) => {
+    try {
+      setSubmitLoading(true);
+      await apiClient.retirar({
+        cracha_colaborador: crachColaborador,
+        ferramentas: cart.map(f => ({ codigo: f.codigo, qtd: f.qty, checklist: 'REALIZADO', observacao: 'Retirada via app' })),
+      });
+      setCart([]);
+      setCartModal(false);
+      showToast('Retirada registrada com sucesso!');
+      await load();
+    } catch (e: any) {
+      showToast('Erro: ' + (e.message || 'Falha ao registrar'));
     } finally {
-      setIsLoading(false);
+      setSubmitLoading(false);
     }
   };
 
-  const openModal = (ferramenta: Ferramenta) => {
-    setSelectedFerr(ferramenta);
-    setModalVisible(true);
-  };
-
-  const closeModal = () => {
-    setModalVisible(false);
-    setTimeout(() => setSelectedFerr(null), 400);
-  };
-
-  const handleAuthorized = useCallback((ferramenta: Ferramenta, autorizadoPor: string) => {
-    setFerramentas(prev => prev.filter(f => f.codigo !== ferramenta.codigo));
-    setEmprestimos(prev => [{ ...ferramenta, pegouEm: new Date(), autorizadoPor }, ...prev]);
-    showToast(`${ferramenta.nome} retirada com sucesso!`);
-  }, []);
-
-  const handleReturn = useCallback((codigo: string) => {
-    const item = emprestimos.find(e => e.codigo === codigo);
-    if (!item) return;
-    setEmprestimos(prev => prev.filter(e => e.codigo !== codigo));
-    setFerramentas(prev => [{ codigo: item.codigo, nome: item.nome, categoria: item.categoria, status: 'Disponível' }, ...prev]);
-    showToast('Ferramenta devolvida');
-  }, [emprestimos]);
-
-  const showToast = (message: string) => {
-    setToast({ visible: true, message });
-    setTimeout(() => setToast(t => ({ ...t, visible: false })), 3000);
+  const showToast = (msg: string) => {
+    setToast({ visible: true, msg });
+    setTimeout(() => setToast({ visible: false, msg: '' }), 3200);
   };
 
   const filtered = ferramentas.filter(f => {
@@ -611,120 +813,152 @@ export default function AlmoxarifadoScreen() {
     return f.nome.toLowerCase().includes(q) || f.codigo.toLowerCase().includes(q) || f.categoria.toLowerCase().includes(q);
   });
 
+  const headerTY = headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] });
+
   return (
     <View style={s.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.orange} />
+      <StatusBar barStyle="light-content" backgroundColor={D.orange} />
 
       {/* Header */}
-      <SafeAreaView style={s.headerBg} edges={['top']}>
-        <View style={s.headerRow}>
-          <View>
-            <Text style={s.title}>Almoxarifado</Text>
-            <Text style={s.sub}>
-              {ferramentas.length} {ferramentas.length === 1 ? 'ferramenta disponível' : 'ferramentas disponíveis'}
-            </Text>
-          </View>
-          {emprestimos.length > 0 && (
-            <View style={s.badge}>
-              <Text style={s.badgeNum}>{emprestimos.length}</Text>
-              <Text style={s.badgeLabel}>com você</Text>
-            </View>
-          )}
+      <SafeAreaView style={s.headerZone} edges={['top']}>
+        {/* Dot grid decoration */}
+        <View style={s.dots} pointerEvents="none">
+          {Array.from({ length: 12 }).map((_, i) => <View key={i} style={s.dot} />)}
         </View>
 
-        <View style={s.searchWrap}>
-          <IconSearch size={15} color={query ? C.orange : C.gray400} />
-          <TextInput
-            style={s.searchInput}
-            placeholder="Buscar por nome, código ou categoria..."
-            placeholderTextColor={C.gray400}
-            value={query}
-            onChangeText={setQuery}
-            autoCorrect={false}
-            autoCapitalize="none"
-          />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <IconX size={14} color={C.gray400} />
-            </TouchableOpacity>
-          )}
-        </View>
+        <Animated.View style={[s.header, { opacity: headerAnim, transform: [{ translateY: headerTY }] }]}>
+          <View style={s.headerRow}>
+            <View>
+              <Text style={s.title}>Almoxarifado</Text>
+              <Text style={s.sub}>{ferramentas.length} ferramentas disponíveis</Text>
+            </View>
+            {cart.length > 0 && (
+              <TouchableOpacity style={s.cartBadge} onPress={() => setCartModal(true)} activeOpacity={0.8}>
+                <CartIcon size={16} color={D.white} />
+                <Text style={s.cartBadgeNum}>{cart.reduce((a, c) => a + c.qty, 0)}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Search */}
+          <View style={s.searchBox}>
+            <SearchIcon size={15} color={query ? D.orange : D.gray400} />
+            <TextInput
+              style={s.searchInput}
+              placeholder="Buscar ferramentas…"
+              placeholderTextColor={D.gray300}
+              value={query}
+              onChangeText={setQuery}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            {!!query && (
+              <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <XIcon size={12} color={D.gray400} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </Animated.View>
       </SafeAreaView>
 
       {/* Body */}
-      <ScrollView
-        style={s.body}
-        contentContainerStyle={s.bodyContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Empréstimos ativos */}
-        {emprestimos.length > 0 && (
+      <ScrollView style={s.body} contentContainerStyle={[s.bodyContent, { paddingBottom: cart.length > 0 ? 120 : 40 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+        {/* Cart */}
+        {cart.length > 0 && (
           <View style={s.section}>
-            <SectionLabel label="Com você agora" count={emprestimos.length} accentColor={C.orange} />
-            {emprestimos.map((item, i) => (
-              <EmprestimoCard key={item.codigo} item={item} index={i} onReturn={handleReturn} />
+            <SectionHeader label="Carrinho" count={cart.reduce((a, c) => a + c.qty, 0)} color={D.orange} />
+            {cart.map((item, i) => (
+              <CartCard key={item.codigo} item={item} index={i} onRemove={removeFromCart} onQtyChange={changeQty} />
             ))}
           </View>
         )}
 
-        {/* Ferramentas disponíveis */}
+        {/* Available */}
         <View style={s.section}>
-          <SectionLabel label="Disponíveis" count={filtered.length} accentColor={C.green} />
-
-          {isLoading ? (
-            <View style={s.centerState}>
-              <ActivityIndicator color={C.orange} />
-              <Text style={s.stateText}>Carregando ferramentas...</Text>
+          <SectionHeader label="Disponíveis" count={filtered.length} color={D.green} />
+          {loading ? (
+            <View style={s.loadState}>
+              <ActivityIndicator color={D.orange} />
+              <Text style={s.loadText}>Carregando…</Text>
             </View>
           ) : filtered.length === 0 ? (
-            <View style={s.centerState}>
-              <Text style={s.emptyEmoji}>🔧</Text>
-              <Text style={s.stateTitle}>{query ? 'Nenhum resultado' : 'Nenhuma ferramenta disponível'}</Text>
-              {!!query && <Text style={s.stateText}>Tente outro termo de busca</Text>}
+            <View style={s.emptyState}>
+              <Text style={s.emptyIcon}>🔧</Text>
+              <Text style={s.emptyTitle}>{query ? 'Sem resultados' : 'Nenhuma ferramenta'}</Text>
+              {!!query && <Text style={s.emptySub}>Tente outro termo</Text>}
             </View>
           ) : (
             filtered.map((item, i) => (
-              <FerramentaRow key={item.codigo} item={item} index={i} onPress={openModal} />
+              <AvailableRow
+                key={item.codigo}
+                item={item}
+                index={i}
+                onPress={f => { setSelected(f); setAuthModal(true); }}
+              />
             ))
           )}
         </View>
-
-        <View style={{ height: 40 }} />
       </ScrollView>
 
-      <AuthorizationModal
-        visible={modalVisible}
-        ferramenta={selectedFerr}
-        onClose={closeModal}
-        onAuthorized={handleAuthorized}
+      {/* FAB */}
+      <CartFAB count={cart.reduce((a, c) => a + c.qty, 0)} onPress={() => setCartModal(true)} anim={fabAnim} />
+
+      <AuthModal
+        visible={authModal}
+        ferramenta={selected}
+        onClose={() => { setAuthModal(false); setTimeout(() => setSelected(null), 400); }}
+        onAuthorized={(f, cracha) => addToCart(f, cracha)}
       />
 
-      <Toast message={toast.message} visible={toast.visible} />
+      <CartModal
+        visible={cartModal}
+        cart={cart}
+        onClose={() => setCartModal(false)}
+        onConfirm={submitRetirada}
+        loading={submitLoading}
+      />
+
+      <Toast message={toast.msg} visible={toast.visible} />
     </View>
   );
 }
 
+// ─── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.offWhite },
+  root: { flex: 1, backgroundColor: D.orange },
+  headerZone: { backgroundColor: D.orange, overflow: 'hidden' },
+  dots: {
+    position: 'absolute', right: 18, top: 18,
+    flexDirection: 'row', flexWrap: 'wrap', width: 54, gap: 8, opacity: 0.2,
+  },
+  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: D.white },
+  header: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 20 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
+  title: { fontSize: 28, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
+  sub: { fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2, fontWeight: '500' },
+  cartBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 12,
+    paddingVertical: 8, paddingHorizontal: 14,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)',
+  },
+  cartBadgeNum: { fontSize: 16, fontWeight: '900', color: D.white },
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: D.white, borderRadius: 14,
+    paddingHorizontal: 16, height: 48,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: D.black, fontWeight: '500' },
 
-  headerBg: { backgroundColor: C.orange },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 12, paddingBottom: 8 },
-  title: { fontSize: 26, fontWeight: '800', color: C.white, letterSpacing: -0.4 },
-  sub: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 3, fontWeight: '500' },
-  badge: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.18)', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 14 },
-  badgeNum: { fontSize: 22, fontWeight: '800', color: C.white, lineHeight: 26 },
-  badgeLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  body: { flex: 1, backgroundColor: D.offWhite, borderTopLeftRadius: 26, borderTopRightRadius: 26 },
+  bodyContent: { paddingHorizontal: 20, paddingTop: 20 },
+  section: { marginBottom: 10 },
 
-  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.white, borderRadius: 14, paddingHorizontal: 14, height: 46, marginHorizontal: 20, marginBottom: 16 },
-  searchInput: { flex: 1, fontSize: 14, color: C.black, paddingVertical: 0 },
-
-  body: { flex: 1 },
-  bodyContent: { paddingTop: 20, paddingHorizontal: 20 },
-  section: { marginBottom: 12 },
-
-  centerState: { alignItems: 'center', paddingVertical: 48, gap: 10 },
-  stateText: { fontSize: 14, color: C.gray500 },
-  stateTitle: { fontSize: 15, fontWeight: '700', color: C.gray600 },
-  emptyEmoji: { fontSize: 36 },
+  loadState: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 40, gap: 10 },
+  loadText: { fontSize: 14, color: D.gray500 },
+  emptyState: { alignItems: 'center', paddingVertical: 40, gap: 8 },
+  emptyIcon: { fontSize: 40 },
+  emptyTitle: { fontSize: 16, fontWeight: '800', color: D.gray700 },
+  emptySub: { fontSize: 13, color: D.gray400 },
 });

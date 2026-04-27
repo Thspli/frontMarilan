@@ -46,7 +46,6 @@ function EyeOpen({ color = COLORS.orange }: { color?: string }) {
 function EyeClosed({ color = COLORS.orange }: { color?: string }) {
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      {/* upper lid arc */}
       <Path
         d="M1 12C1 12 5 5 12 5C19 5 23 12 23 12"
         stroke={color}
@@ -54,7 +53,6 @@ function EyeClosed({ color = COLORS.orange }: { color?: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {/* lashes */}
       <Path d="M3 15L5.5 12.5"   stroke={color} strokeWidth={1.8} strokeLinecap="round" />
       <Path d="M21 15L18.5 12.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
       <Path d="M8 17L9 14.5"     stroke={color} strokeWidth={1.8} strokeLinecap="round" />
@@ -145,73 +143,65 @@ export default function LoginScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.orange} />
 
-      {/* ── Header ─────────────────────────────────────── */}
-      <View style={styles.header}>
-        <View style={styles.circle1} />
-        <View style={styles.circle2} />
-        <View style={styles.logoContainer}>
-          {/* Substitua o logoBox pelo seu <Image source={...} /> */}
-          <View style={styles.logoBox}>
-            <Text style={styles.logoLetter}>M</Text>
-          </View>
-          <Text style={styles.logoName}>Marilan</Text>
-          <Text style={styles.logoTagline}>Plataforma Institucional</Text>
-        </View>
-      </View>
-
-      {/* ── Card ───────────────────────────────────────── */}
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
-
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Bem-vindo(a)</Text>
-            <Text style={styles.cardSubtitle}>Faça login para continuar</Text>
-
-            <View style={styles.form}>
-              <FloatingInput
-                label="E-mail"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-              />
-              <FloatingInput
-                label="Senha"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-              />
-              <TouchableOpacity style={styles.forgotBtn}>
-                <Text style={styles.forgotText}>Esqueci minha senha</Text>
-              </TouchableOpacity>
+      {/* ── Header fixo — fora de qualquer ScrollView ── */}
+      <SafeAreaView style={styles.headerSafe} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.circle1} />
+          <View style={styles.circle2} />
+          <View style={styles.logoContainer}>
+            <View style={styles.logoBox}>
+              <Text style={styles.logoLetter}>M</Text>
             </View>
+            <Text style={styles.logoName}>Marilan</Text>
+            <Text style={styles.logoTagline}>Plataforma Institucional</Text>
+          </View>
+        </View>
+      </SafeAreaView>
 
-            <TouchableOpacity
-              style={[styles.loginBtn, loading && styles.loginBtnLoading]}
-              onPress={handleLogin}
-              activeOpacity={0.85}>
-              <Text style={styles.loginBtnText}>{loading ? 'Entrando…' : 'Entrar'}</Text>
+      {/* ── Card estático ── */}
+      <SafeAreaView style={styles.flex} edges={['bottom']}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Bem-vindo(a)</Text>
+          <Text style={styles.cardSubtitle}>Faça login para continuar</Text>
+
+          <View style={styles.form}>
+            <FloatingInput
+              label="E-mail"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+            />
+            <FloatingInput
+              label="Senha"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+            />
+            <TouchableOpacity style={styles.forgotBtn}>
+              <Text style={styles.forgotText}>Esqueci minha senha</Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.footer}>
-            Em caso de problemas, contate o suporte técnico.
-          </Text>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          <TouchableOpacity
+            style={[styles.loginBtn, loading && styles.loginBtnLoading]}
+            onPress={handleLogin}
+            activeOpacity={0.85}>
+            <Text style={styles.loginBtnText}>{loading ? 'Entrando…' : 'Entrar'}</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.orange },
-  flex: { flex: 1 },
+  root: { flex: 1, backgroundColor: COLORS.orange },
+  headerSafe: { backgroundColor: COLORS.orange },
+  flex: { flex: 1, backgroundColor: COLORS.white },
 
   header: {
     backgroundColor: COLORS.orange,

@@ -1,11 +1,11 @@
 /**
  * app/(tabs)/almoxarifado.tsx — Marilan v5 · Sistema de Gestão Inteligente
  *
- * CAMADAS DE INTELIGÊNCIA:
- *   1. Cronômetro de Custódia — tempo real de posse por ferramenta
- *   2. Log de Auditoria Local — registro persistente de cada movimentação
- *   3. Botão "Localizar" — infra pronta para integração Beacon/BLE
- *   4. Dashboard "Status do Turno" — card gerencial no topo
+ * ALTERAÇÕES v5.1:
+ *   Modal de Liberação Manual agora exige dois campos:
+ *     - ID do Colaborador (quem retira)
+ *     - ID do Crachá (Almoxarife) (quem autoriza)
+ *   Após envio exibe tela de status: "Aguardando confirmação no terminal..."
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -40,11 +40,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
-// ─── Chave de armazenamento para logs e timestamps de custódia ─────────────────
 const AUDIT_LOG_KEY = 'marilan_audit_logs';
 const CUSTODY_TIMESTAMPS_KEY = 'marilan_custody_timestamps';
 
-// ─── Design System ─────────────────────────────────────────────────────────────
 const D = {
   orange:     '#FF5722',
   orangeHot:  '#FF6D00',
@@ -80,7 +78,6 @@ const D = {
   nfcBorder:  'rgba(255,87,34,0.3)',
 };
 
-// ─── Tipos ─────────────────────────────────────────────────────────────────────
 type FerStatus = 'Disponível' | 'Em uso' | 'Em manutenção';
 
 interface Ferramenta {
@@ -89,7 +86,6 @@ interface Ferramenta {
   categoria: string;
   status: FerStatus;
   alocadoPara?: string;
-  // Timestamp de quando entrou em custódia (injetado localmente)
   custodiaDesde?: number;
 }
 
@@ -97,26 +93,21 @@ interface LoteItem extends Ferramenta {
   qty: number;
 }
 
-/**
- * Log de Auditoria — salvo em AsyncStorage a cada movimentação.
- * Em produção, sincronizar com endpoint POST /logs ou similar.
- */
 interface AuditLog {
   id: string;
-  timestamp: number;         // Unix ms
+  timestamp: number;
   acao: 'RETIRADA' | 'DEVOLUCAO' | 'TROCA';
   ferramentas: Array<{ codigo: string; nome: string; qty: number }>;
-  responsavel: string;       // Crachá do almoxarife que autorizou
-  autorizador: string;       // Crachá do colaborador que recebeu
+  responsavel: string;
+  autorizador: string;
   metodo: 'NFC' | 'MANUAL';
 }
 
 type LibMode = 'nfc' | 'manual';
 type NFCPhase = 'waiting' | 'simulated_connected' | 'confirming' | 'submitting' | 'done' | 'error';
+// Nova fase para o fluxo manual
+type ManualPhase = 'form' | 'submitting' | 'awaiting' | 'done' | 'error';
 
-// ─── Utilidades ────────────────────────────────────────────────────────────────
-
-/** Formata ms em "Xh Ym" ou "Ym Zs" */
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const h = Math.floor(totalSeconds / 3600);
@@ -127,25 +118,22 @@ function formatElapsed(ms: number): string {
   return `${s}s`;
 }
 
-/** Gera id único simples */
 function genId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/** Salva log no AsyncStorage */
 async function saveAuditLog(log: AuditLog): Promise<void> {
   try {
     const raw = await AsyncStorage.getItem(AUDIT_LOG_KEY);
     const logs: AuditLog[] = raw ? JSON.parse(raw) : [];
-    logs.unshift(log);           // mais recente primeiro
-    const capped = logs.slice(0, 500);  // limite de 500 entradas
+    logs.unshift(log);
+    const capped = logs.slice(0, 500);
     await AsyncStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(capped));
   } catch (err) {
     console.error('[AuditLog] Falha ao salvar:', err);
   }
 }
 
-/** Lê timestamps de custódia { [codigo]: timestamp_inicio } */
 async function loadCustodyTimestamps(): Promise<Record<string, number>> {
   try {
     const raw = await AsyncStorage.getItem(CUSTODY_TIMESTAMPS_KEY);
@@ -231,7 +219,6 @@ const KeyboardIcon = ({ size = 20, color = D.orange }: { size?: number; color?: 
   </Svg>
 );
 
-/** Ícone de Localizar — infra para Beacon/BLE */
 const LocateIcon = ({ size = 14, color = D.blue }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={1.8} />
@@ -240,7 +227,6 @@ const LocateIcon = ({ size = 14, color = D.blue }: { size?: number; color?: stri
   </Svg>
 );
 
-/** Ícone de Histórico de Log */
 const LogIcon = ({ size = 14, color = D.iron }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke={color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
@@ -248,11 +234,36 @@ const LogIcon = ({ size = 14, color = D.iron }: { size?: number; color?: string 
   </Svg>
 );
 
-/** Ícone de Cronômetro */
 const TimerIcon = ({ size = 12, color = D.amber }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Circle cx={12} cy={13} r={8} stroke={color} strokeWidth={1.8} />
     <Path d="M12 9v4l3 3M9 2h6" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+// ─── Novo: Ícone Usuário Colaborador ──────────────────────────────────────────
+const UserColaboradorIcon = ({ size = 16, color = D.orange }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx={12} cy={8} r={4} stroke={color} strokeWidth={1.7} />
+    <Path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+  </Svg>
+);
+
+// ─── Novo: Ícone Chave/Almoxarife ─────────────────────────────────────────────
+const KeyAlmoxarifeIcon = ({ size = 16, color = D.orange }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx={8} cy={11} r={5} stroke={color} strokeWidth={1.7} />
+    <Path d="M13 11h8M17 9v4" stroke={color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
+    <Circle cx={8} cy={11} r={2} fill={color} opacity={0.35} />
+  </Svg>
+);
+
+// ─── Novo: Ícone Relógio Aguardando ───────────────────────────────────────────
+const AwaitingIcon = ({ size = 48, color = D.orange }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.6} />
+    <Path d="M12 7v5l3.5 3.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M3.5 3.5l1.5 1.5M19 5l1.5-1.5" stroke={color} strokeWidth={1.5} strokeLinecap="round" opacity={0.4} />
   </Svg>
 );
 
@@ -397,14 +408,9 @@ const stb = StyleSheet.create({
   label: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
 });
 
-// ─── [1] Cronômetro de Custódia ────────────────────────────────────────────────
-/**
- * Exibe tempo decorrido desde custodiaDesde, atualizando a cada segundo.
- * Fica laranja após 4h (alerta de longa permanência).
- */
 function CustodyTimer({ since }: { since: number }) {
   const [elapsed, setElapsed] = useState(Date.now() - since);
-  const isOverdue = elapsed > 4 * 60 * 60 * 1000; // > 4 horas
+  const isOverdue = elapsed > 4 * 60 * 60 * 1000;
 
   useEffect(() => {
     const id = setInterval(() => setElapsed(Date.now() - since), 1000);
@@ -414,9 +420,7 @@ function CustodyTimer({ since }: { since: number }) {
   return (
     <View style={[ct.wrap, isOverdue && ct.wrapOverdue]}>
       <TimerIcon size={10} color={isOverdue ? D.orange : D.amber} />
-      <Text style={[ct.text, isOverdue && ct.textOverdue]}>
-        {formatElapsed(elapsed)}
-      </Text>
+      <Text style={[ct.text, isOverdue && ct.textOverdue]}>{formatElapsed(elapsed)}</Text>
     </View>
   );
 }
@@ -428,30 +432,14 @@ const ct = StyleSheet.create({
   textOverdue: { color: D.orange },
 });
 
-// ─── [3] Botão Localizar ───────────────────────────────────────────────────────
-/**
- * Acionamento: abre um Alert informativo.
- * Comentário de integração: em produção, acionar SDK de Beacon/BLE
- * para triangular posição do ativo no mapa da planta industrial.
- * Ex: BeaconManager.startRangingBeaconsInRegion(region) no Android,
- *     CLLocationManager.startRangingBeacons no iOS.
- */
 function LocateButton({ codigo, nome }: { codigo: string; nome: string }) {
   const handleLocate = () => {
-    // TODO (Integração Beacon/BLE):
-    //   1. Chamar BeaconManager.startRangingBeaconsInRegion({ id: codigo })
-    //   2. Receber lista de beacons próximos com RSSI/distância estimada
-    //   3. Cruzar com mapa da planta (GeoJSON salvo localmente)
-    //   4. Abrir MapView centrado na posição triangulada
-    //   Nota: diferencial frente a painéis fixos — rastreio em tempo real
-    //   de ativos em movimento dentro da planta sem infraestrutura de câmeras.
     Alert.alert(
       '📡 Localizar Ferramenta',
-      `${nome} (${codigo})\n\nRastreio via Beacon BLE em desenvolvimento.\n\nEste botão acionará triangulação por beacons instalados na planta, exibindo a posição em tempo real no mapa industrial — algo impossível em sistemas de controle de acesso fixo.`,
+      `${nome} (${codigo})\n\nRastreio via Beacon BLE em desenvolvimento.`,
       [{ text: 'Entendido', style: 'default' }]
     );
   };
-
   return (
     <TouchableOpacity style={lb.btn} onPress={handleLocate} activeOpacity={0.75} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
       <LocateIcon size={13} color={D.blue} />
@@ -465,7 +453,6 @@ const lb = StyleSheet.create({
   text: { fontSize: 10, fontWeight: '700', color: D.blue },
 });
 
-// ─── [2] Modal de Logs de Auditoria ───────────────────────────────────────────
 function AuditLogModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -508,7 +495,6 @@ function AuditLogModal({ visible, onClose }: { visible: boolean; onClose: () => 
       <Animated.View style={[alm.backdrop, { opacity: bgOp }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={close} />
       </Animated.View>
-
       <Animated.View style={[alm.sheet, { transform: [{ translateY: slideY }] }]}>
         <View style={alm.handle} />
         <View style={alm.headerRow}>
@@ -523,13 +509,9 @@ function AuditLogModal({ visible, onClose }: { visible: boolean; onClose: () => 
             <XIcon size={14} color={D.slate} />
           </TouchableOpacity>
         </View>
-
         <View style={alm.infoBar}>
-          <Text style={alm.infoText}>
-            💡 Logs salvos localmente. Em produção, sincronizar com POST /logs para auditoria centralizada e rastreabilidade jurídica.
-          </Text>
+          <Text style={alm.infoText}>💡 Logs salvos localmente. Em produção, sincronizar com POST /logs para auditoria centralizada.</Text>
         </View>
-
         {loading ? (
           <View style={alm.loadState}>
             <ActivityIndicator color={D.orange} />
@@ -559,7 +541,6 @@ function AuditLogModal({ visible, onClose }: { visible: boolean; onClose: () => 
                     <Text style={[alm.metodoText, { color: item.metodo === 'NFC' ? D.orange : D.blue }]}>{item.metodo}</Text>
                   </View>
                 </View>
-
                 <View style={alm.logMeta}>
                   <Text style={alm.logMetaText}>🔧 {item.ferramentas.map(f => `${f.nome} ×${f.qty}`).join(' · ')}</Text>
                 </View>
@@ -607,29 +588,11 @@ const alm = StyleSheet.create({
   boldText: { fontWeight: '700', color: D.obsidian },
 });
 
-// ─── [4] Card "Status do Turno" ────────────────────────────────────────────────
-/**
- * Dashboard gerencial exibido no topo da tela.
- * Mostra ferramentas em uso, disponíveis, no lote atual,
- * e alertas de "atraso" (custódia > 4h).
- */
-function ShiftStatusCard({
-  emUso,
-  disponiveis,
-  noLote,
-  atrasos,
-  onOpenLogs,
-  headerAnim,
-}: {
-  emUso: number;
-  disponiveis: number;
-  noLote: number;
-  atrasos: number;
-  onOpenLogs: () => void;
-  headerAnim: Animated.Value;
+function ShiftStatusCard({ emUso, disponiveis, noLote, atrasos, onOpenLogs, headerAnim }: {
+  emUso: number; disponiveis: number; noLote: number; atrasos: number;
+  onOpenLogs: () => void; headerAnim: Animated.Value;
 }) {
   const ty = headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] });
-
   return (
     <Animated.View style={[ssc.card, { opacity: headerAnim, transform: [{ translateY: ty }] }]}>
       <View style={ssc.topRow}>
@@ -642,7 +605,6 @@ function ShiftStatusCard({
           <Text style={ssc.logBtnText}>Auditoria</Text>
         </TouchableOpacity>
       </View>
-
       <View style={ssc.metricsRow}>
         <View style={ssc.metric}>
           <View style={[ssc.metricDot, { backgroundColor: D.redLight }]} />
@@ -668,13 +630,10 @@ function ShiftStatusCard({
           <Text style={ssc.metricLbl}>Atrasos</Text>
         </View>
       </View>
-
       {atrasos > 0 && (
         <View style={ssc.alertBar}>
           <TimerIcon size={12} color={D.orange} />
-          <Text style={ssc.alertText}>
-            {atrasos} {atrasos === 1 ? 'ferramenta' : 'ferramentas'} em custódia há mais de 4h
-          </Text>
+          <Text style={ssc.alertText}>{atrasos} {atrasos === 1 ? 'ferramenta' : 'ferramentas'} em custódia há mais de 4h</Text>
         </View>
       )}
     </Animated.View>
@@ -698,12 +657,9 @@ const ssc = StyleSheet.create({
   alertText: { fontSize: 11, color: D.white, fontWeight: '600', flex: 1 },
 });
 
-// ─── Seção: Minhas Ferramentas (com Cronômetro + Localizar) ───────────────────
 function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver: () => void }) {
   const [expanded, setExpanded] = useState(true);
-
   if (items.length === 0) return null;
-
   return (
     <View style={my.wrap}>
       <TouchableOpacity style={my.header} onPress={() => setExpanded(v => !v)} activeOpacity={0.8}>
@@ -720,25 +676,16 @@ function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver
           </Svg>
         </View>
       </TouchableOpacity>
-
       {expanded && (
         <View style={my.listWrap}>
           {items.map((item, idx) => (
             <View key={item.codigo} style={[my.item, idx < items.length - 1 && my.itemBorder]}>
               <View style={my.itemLeft}>
-                <View style={my.itemCode}>
-                  <Text style={my.itemCodeText}>{item.codigo}</Text>
-                </View>
+                <View style={my.itemCode}><Text style={my.itemCodeText}>{item.codigo}</Text></View>
                 <View style={{ flex: 1 }}>
                   <Text style={my.itemName} numberOfLines={1}>{item.nome}</Text>
                   <View style={my.itemTagRow}>
-                    {/* [1] Cronômetro de custódia */}
-                    {item.custodiaDesde ? (
-                      <CustodyTimer since={item.custodiaDesde} />
-                    ) : (
-                      <Text style={my.itemCat}>{item.categoria}</Text>
-                    )}
-                    {/* [3] Botão Localizar */}
+                    {item.custodiaDesde ? <CustodyTimer since={item.custodiaDesde} /> : <Text style={my.itemCat}>{item.categoria}</Text>}
                     <LocateButton codigo={item.codigo} nome={item.nome} />
                   </View>
                 </View>
@@ -746,7 +693,6 @@ function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver
               <StatusBadge status={item.status} />
             </View>
           ))}
-
           <TouchableOpacity style={my.devolverBtn} onPress={onDevolver} activeOpacity={0.85}>
             <BackIcon size={15} color={D.orange} />
             <Text style={my.devolverText}>Iniciar Devolução</Text>
@@ -779,7 +725,6 @@ const my = StyleSheet.create({
   devolverText: { fontSize: 13, fontWeight: '700', color: D.orange },
 });
 
-// ─── Card: Ferramenta Disponível ───────────────────────────────────────────────
 function AvailableCard({ item, index, onAdd, isInLote }: { item: Ferramenta; index: number; onAdd: (f: Ferramenta) => void; isInLote: boolean }) {
   const oy = useRef(new Animated.Value(14)).current;
   const op = useRef(new Animated.Value(0)).current;
@@ -815,7 +760,6 @@ function AvailableCard({ item, index, onAdd, isInLote }: { item: Ferramenta; ind
             <Text style={av.cat}>{item.categoria}</Text>
           </View>
         </View>
-        {/* [3] Botão Localizar também nas disponíveis */}
         <LocateButton codigo={item.codigo} nome={item.nome} />
         <TouchableOpacity style={[av.addBtn, isInLote && av.addBtnAdded]} onPress={press} activeOpacity={0.8}>
           {isInLote ? <CheckIcon size={14} color={D.white} /> : <PlusIcon size={13} color={D.white} />}
@@ -839,7 +783,6 @@ const av = StyleSheet.create({
   addBtnAdded: { backgroundColor: D.green },
 });
 
-// ─── Lote Item Card ────────────────────────────────────────────────────────────
 function LoteCard({ item, onRemove, onQtyChange }: { item: LoteItem; onRemove: (c: string) => void; onQtyChange: (c: string, d: number) => void }) {
   const oy = useRef(new Animated.Value(-8)).current;
   const op = useRef(new Animated.Value(0)).current;
@@ -896,7 +839,6 @@ const lc = StyleSheet.create({
   removeBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: D.mist, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
 });
 
-// ─── Section Header ────────────────────────────────────────────────────────────
 function SectionHdr({ label, count, color = D.slate }: { label: string; count: number; color?: string }) {
   return (
     <View style={shdr.row}>
@@ -917,7 +859,6 @@ const shdr = StyleSheet.create({
   num: { fontSize: 11, fontWeight: '800' },
 });
 
-// ─── Floating Action Bar ───────────────────────────────────────────────────────
 function LoteFooter({ count, onSolicitar, anim }: { count: number; onSolicitar: () => void; anim: Animated.Value }) {
   const sc = anim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
   const ty = anim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
@@ -946,7 +887,9 @@ const lf = StyleSheet.create({
   arrowBox: { width: 36, height: 36, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
 });
 
-// ─── Modal de Liberação ────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// ─── MODAL DE LIBERAÇÃO (ATUALIZADO v5.1) ─────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
 interface LibModalProps {
   visible: boolean;
   lote: LoteItem[];
@@ -954,12 +897,261 @@ interface LibModalProps {
   onSuccess: (crachaColaborador: string, metodo: 'NFC' | 'MANUAL') => Promise<void>;
 }
 
+/**
+ * Tela pulsante de "Aguardando Confirmação" — exibida após envio manual.
+ * Pulsa suavemente para indicar estado de espera ativa.
+ */
+function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClose: () => void }) {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const dotAnim1 = useRef(new Animated.Value(0)).current;
+  const dotAnim2 = useRef(new Animated.Value(0)).current;
+  const dotAnim3 = useRef(new Animated.Value(0)).current;
+  const slideIn = useRef(new Animated.Value(30)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    // Entrada
+    Animated.parallel([
+      Animated.spring(slideIn, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+    ]).start();
+
+    // Pulso do ícone
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    ).start();
+
+    // Dots de loading animados
+    const dotLoop = (anim: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(anim, { toValue: 1, duration: 400, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0.25, duration: 400, useNativeDriver: true }),
+        ])
+      ).start();
+
+    dotLoop(dotAnim1, 0);
+    dotLoop(dotAnim2, 200);
+    dotLoop(dotAnim3, 400);
+  }, []);
+
+  const totalQty = lote.reduce((a, c) => a + c.qty, 0);
+
+  return (
+    <Animated.View style={[aw.container, { opacity, transform: [{ translateY: slideIn }] }]}>
+      {/* Ícone pulsante */}
+      <Animated.View style={[aw.iconRing, { transform: [{ scale: pulseAnim }] }]}>
+        <View style={aw.iconRingInner}>
+          <AwaitingIcon size={44} color={D.orange} />
+        </View>
+      </Animated.View>
+
+      {/* Título e mensagem */}
+      <View style={aw.textBlock}>
+        <Text style={aw.title}>Solicitação Enviada!</Text>
+        <Text style={aw.subtitle}>Aguardando confirmação no{'\n'}terminal do Almoxarife</Text>
+      </View>
+
+      {/* Dots de loading */}
+      <View style={aw.dotsRow}>
+        {[dotAnim1, dotAnim2, dotAnim3].map((d, i) => (
+          <Animated.View key={i} style={[aw.dot, { opacity: d }]} />
+        ))}
+      </View>
+
+      {/* Resumo do lote */}
+      <View style={aw.loteCard}>
+        <Text style={aw.loteCardTitle}>ITENS DA SOLICITAÇÃO</Text>
+        {lote.map(item => (
+          <View key={item.codigo} style={aw.loteRow}>
+            <View style={aw.loteDot} />
+            <Text style={aw.loteCode}>{item.codigo}</Text>
+            <Text style={aw.loteName} numberOfLines={1}>{item.nome}</Text>
+            <View style={aw.loteQtyBadge}>
+              <Text style={aw.loteQty}>×{item.qty}</Text>
+            </View>
+          </View>
+        ))}
+        <View style={aw.loteSeparator} />
+        <View style={aw.loteTotalRow}>
+          <Text style={aw.loteTotalLabel}>Total de itens</Text>
+          <Text style={aw.loteTotalQty}>{totalQty}</Text>
+        </View>
+      </View>
+
+      {/* Instrução */}
+      <View style={aw.instructionBar}>
+        <View style={aw.instructionDot} />
+        <Text style={aw.instructionText}>
+          O Almoxarife receberá a notificação e deverá confirmar no terminal. Mantenha o app aberto.
+        </Text>
+      </View>
+
+      {/* Botão fechar */}
+      <TouchableOpacity style={aw.closeBtn} onPress={onClose} activeOpacity={0.85}>
+        <Text style={aw.closeBtnText}>Fechar e Aguardar</Text>
+        <ArrowIcon size={15} color={D.white} />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+const aw = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 20,
+  },
+  iconRing: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    backgroundColor: `${D.orange}12`,
+    borderWidth: 1.5,
+    borderColor: D.orangeLine,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconRingInner: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: `${D.orange}20`,
+    borderWidth: 1,
+    borderColor: `${D.orange}35`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textBlock: { alignItems: 'center', gap: 8 },
+  title: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: D.white,
+    letterSpacing: -0.3,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.50)',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    marginTop: -8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: D.orange,
+  },
+  loteCard: {
+    width: '100%',
+    backgroundColor: D.nfcSurface,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: D.nfcBorder,
+    gap: 10,
+  },
+  loteCardTitle: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: D.orange,
+    letterSpacing: 1.8,
+    marginBottom: 2,
+  },
+  loteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  loteDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: D.orange },
+  loteCode: {
+    fontSize: 10,
+    color: D.orange,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontWeight: '600',
+    minWidth: 68,
+  },
+  loteName: { flex: 1, fontSize: 12, color: 'rgba(255,255,255,0.70)', fontWeight: '500' },
+  loteQtyBadge: { backgroundColor: D.orangeSoft, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
+  loteQty: { fontSize: 10, fontWeight: '800', color: D.orange },
+  loteSeparator: { height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginVertical: 2 },
+  loteTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  loteTotalLabel: { fontSize: 11, color: 'rgba(255,255,255,0.40)', fontWeight: '600' },
+  loteTotalQty: { fontSize: 14, fontWeight: '900', color: D.orange },
+  instructionBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: `${D.orange}10`,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: D.orangeLine,
+    width: '100%',
+  },
+  instructionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: D.orange,
+    marginTop: 4,
+    flexShrink: 0,
+  },
+  instructionText: {
+    flex: 1,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.50)',
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  closeBtn: {
+    width: '100%',
+    height: 54,
+    borderRadius: 14,
+    backgroundColor: D.orange,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    shadowColor: D.orangeDark,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  closeBtnText: { fontSize: 15, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
+});
+
+// ─── COMPONENTE PRINCIPAL DO MODAL ────────────────────────────────────────────
 function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
   const [mode, setMode] = useState<LibMode>('nfc');
   const [nfcPhase, setNfcPhase] = useState<NFCPhase>('waiting');
+
+  // ── Campos do fluxo manual ──────────────────────────────────────────────────
   const [crachaColaborador, setCrachaColaborador] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [crachaAlmoxarife, setCrachaAlmoxarife] = useState('');
+  const [manualPhase, setManualPhase] = useState<ManualPhase>('form');
   const [manualError, setManualError] = useState('');
+
+  // Foco nos inputs para estilo laranja
+  const [focusedField, setFocusedField] = useState<'colaborador' | 'almoxarife' | null>(null);
+
+  const [submitting, setSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(3);
   const bgOpacity = useRef(new Animated.Value(0)).current;
   const contentSlide = useRef(new Animated.Value(60)).current;
@@ -970,7 +1162,15 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
 
   useEffect(() => {
     if (visible) {
-      setMode('nfc'); setNfcPhase('waiting'); setCrachaColaborador(''); setSubmitting(false); setManualError(''); setCountdown(3);
+      setMode('nfc');
+      setNfcPhase('waiting');
+      setCrachaColaborador('');
+      setCrachaAlmoxarife('');
+      setManualPhase('form');
+      setManualError('');
+      setFocusedField(null);
+      setSubmitting(false);
+      setCountdown(3);
       Animated.parallel([
         Animated.timing(bgOpacity, { toValue: 1, duration: 320, useNativeDriver: true }),
         Animated.spring(contentSlide, { toValue: 0, tension: 70, friction: 12, useNativeDriver: true }),
@@ -1017,15 +1217,34 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
     } catch { setNfcPhase('error'); }
   };
 
+  // ── Submissão Manual com dois campos ─────────────────────────────────────────
   const handleManualSubmit = async () => {
-    if (!crachaColaborador.trim()) { setManualError('Informe o crachá do colaborador'); return; }
+    // Validação dos dois campos
+    if (!crachaColaborador.trim()) {
+      setManualError('Informe o ID do Colaborador');
+      return;
+    }
+    if (!crachaAlmoxarife.trim()) {
+      setManualError('Informe o ID do Crachá do Almoxarife');
+      return;
+    }
+
     try {
-      setSubmitting(true); setManualError('');
+      setSubmitting(true);
+      setManualPhase('submitting');
+      setManualError('');
+
+      // Chama API com os dois IDs
       await onSuccess(crachaColaborador.trim(), 'MANUAL');
-      setNfcPhase('done');
-      Animated.spring(successScale, { toValue: 1, tension: 80, friction: 8, useNativeDriver: true }).start();
-      startCountdown();
-    } catch (e: any) { setManualError(e.message || 'Erro ao efetuar retirada'); } finally { setSubmitting(false); }
+
+      // Transição para tela de aguardo
+      setManualPhase('awaiting');
+    } catch (e: any) {
+      setManualError(e.message || 'Erro ao efetuar retirada');
+      setManualPhase('form');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const getNFCText = () => {
@@ -1042,6 +1261,12 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
   const txt = getNFCText();
   const totalQty = lote.reduce((a, c) => a + c.qty, 0);
 
+  // Estilo dinâmico do input com foco laranja
+  const inputBorderStyle = (field: 'colaborador' | 'almoxarife') => ({
+    borderColor: focusedField === field ? D.orange : D.nfcBorder,
+    borderWidth: focusedField === field ? 1.8 : 1.5,
+  });
+
   return (
     <Modal transparent visible={visible} animationType="none" statusBarTranslucent onRequestClose={handleClose}>
       <Animated.View style={[nm.overlay, { opacity: bgOpacity }]} />
@@ -1050,13 +1275,25 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
         <SafeAreaView edges={['top']} style={{ backgroundColor: D.nfcBg }}>
           <View style={nm.header}>
             <View style={nm.headerLeft}>
-              <View style={nm.loteTag}><Text style={nm.loteTagText}>{totalQty} {totalQty === 1 ? 'ITEM' : 'ITENS'} NO LOTE</Text></View>
-              <TouchableOpacity style={nm.modeToggle} onPress={() => { setMode(m => m === 'nfc' ? 'manual' : 'nfc'); setNfcPhase('waiting'); setManualError(''); }} activeOpacity={0.7}>
-                {mode === 'nfc' ? <KeyboardIcon size={14} color="rgba(255,255,255,0.5)" /> : <NFCChipIcon size={14} color="rgba(255,255,255,0.5)" />}
-                <Text style={nm.modeToggleText}>{mode === 'nfc' ? 'Manual' : 'NFC'}</Text>
-              </TouchableOpacity>
+              <View style={nm.loteTag}>
+                <Text style={nm.loteTagText}>{totalQty} {totalQty === 1 ? 'ITEM' : 'ITENS'} NO LOTE</Text>
+              </View>
+              {/* Só mostra o toggle de modo fora do estado awaiting */}
+              {manualPhase !== 'awaiting' && (
+                <TouchableOpacity
+                  style={nm.modeToggle}
+                  onPress={() => { setMode(m => m === 'nfc' ? 'manual' : 'nfc'); setNfcPhase('waiting'); setManualError(''); setManualPhase('form'); }}
+                  activeOpacity={0.7}
+                >
+                  {mode === 'nfc'
+                    ? <KeyboardIcon size={14} color="rgba(255,255,255,0.5)" />
+                    : <NFCChipIcon size={14} color="rgba(255,255,255,0.5)" />
+                  }
+                  <Text style={nm.modeToggleText}>{mode === 'nfc' ? 'Manual' : 'NFC'}</Text>
+                </TouchableOpacity>
+              )}
             </View>
-            {nfcPhase !== 'done' && (
+            {nfcPhase !== 'done' && manualPhase !== 'awaiting' && (
               <TouchableOpacity onPress={handleClose} style={nm.cancelBtn} activeOpacity={0.7}>
                 <Text style={nm.cancelText}>Cancelar</Text>
               </TouchableOpacity>
@@ -1064,6 +1301,7 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
           </View>
         </SafeAreaView>
 
+        {/* ── Fluxo NFC ────────────────────────────────────────────── */}
         {mode === 'nfc' && (
           <>
             <View style={nm.radarArea}>
@@ -1079,7 +1317,6 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
                 </View>
               )}
             </View>
-
             <View style={nm.contentArea}>
               {(nfcPhase === 'simulated_connected' || nfcPhase === 'confirming') && (
                 <View style={nm.itemsCard}>
@@ -1133,13 +1370,20 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
           </>
         )}
 
-        {mode === 'manual' && nfcPhase !== 'done' && (
+        {/* ── Fluxo Manual ─────────────────────────────────────────── */}
+        {mode === 'manual' && manualPhase === 'awaiting' && (
+          <AwaitingConfirmationScreen lote={lote} onClose={handleClose} />
+        )}
+
+        {mode === 'manual' && manualPhase !== 'awaiting' && (
           <KeyboardAvoidingView style={nm.manualContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={nm.manualHeader}>
               <KeyboardIcon size={32} color={D.orange} />
               <Text style={nm.manualTitle}>Liberação Manual</Text>
-              <Text style={nm.manualSub}>Insira o crachá para registrar na API e salvar o log de auditoria</Text>
+              <Text style={nm.manualSub}>Insira os IDs para registrar na API e salvar o log de auditoria</Text>
             </View>
+
+            {/* Resumo do lote */}
             <View style={nm.manualLoteResume}>
               <Text style={nm.manualLoteLabel}>FERRAMENTAS NO LOTE</Text>
               {lote.map(item => (
@@ -1151,33 +1395,108 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
                 </View>
               ))}
             </View>
+
+            {/* ── Campo 1: ID do Colaborador ──────────────────────── */}
             <View style={nm.manualInputWrap}>
-              <Text style={nm.manualInputLabel}>CRACHÁ DO COLABORADOR</Text>
-              <View style={nm.manualInput}>
-                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                  <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
-                  <Circle cx={9} cy={12} r={2.5} stroke={D.orange} strokeWidth={1.6} />
-                  <Path d="M14 10h4M14 14h3" stroke={D.orange} strokeWidth={1.5} strokeLinecap="round" />
-                </Svg>
-                <TextInput style={nm.manualInputText} placeholder="Ex: 1236" placeholderTextColor="rgba(255,255,255,0.25)" value={crachaColaborador} onChangeText={v => { setCrachaColaborador(v); setManualError(''); }} keyboardType="numeric" autoCorrect={false} editable={!submitting} />
+              <View style={nm.manualInputLabelRow}>
+                <UserColaboradorIcon size={13} color={D.orange} />
+                <Text style={nm.manualInputLabel}>ID DO COLABORADOR</Text>
+                <View style={nm.requiredBadge}><Text style={nm.requiredText}>Obrigatório</Text></View>
+              </View>
+              <View style={[nm.manualInput, inputBorderStyle('colaborador')]}>
+                <UserColaboradorIcon size={16} color={focusedField === 'colaborador' ? D.orange : 'rgba(255,87,34,0.45)'} />
+                <TextInput
+                  style={nm.manualInputText}
+                  placeholder="Ex: 1236"
+                  placeholderTextColor="rgba(255,255,255,0.22)"
+                  value={crachaColaborador}
+                  onChangeText={v => { setCrachaColaborador(v); setManualError(''); }}
+                  onFocus={() => setFocusedField('colaborador')}
+                  onBlur={() => setFocusedField(null)}
+                  keyboardType="numeric"
+                  autoCorrect={false}
+                  editable={!submitting}
+                />
+                {crachaColaborador.length > 0 && (
+                  <View style={nm.inputFilledDot} />
+                )}
               </View>
             </View>
-            {!!manualError && (<View style={nm.manualError}><Text style={nm.manualErrorText}>{manualError}</Text></View>)}
-            <TouchableOpacity style={[nm.manualSubmitBtn, submitting && nm.manualSubmitBtnDisabled]} onPress={handleManualSubmit} disabled={submitting} activeOpacity={0.88}>
-              {submitting ? <ActivityIndicator color={D.white} size="small" /> : (<><CheckIcon size={18} color={D.white} /><Text style={nm.manualSubmitText}>Confirmar + Salvar Auditoria</Text></>)}
+
+            {/* ── Campo 2: ID do Crachá (Almoxarife) ─────────────── */}
+            <View style={nm.manualInputWrap}>
+              <View style={nm.manualInputLabelRow}>
+                <KeyAlmoxarifeIcon size={13} color={D.orange} />
+                <Text style={nm.manualInputLabel}>ID DO CRACHÁ (ALMOXARIFE)</Text>
+                <View style={nm.requiredBadge}><Text style={nm.requiredText}>Obrigatório</Text></View>
+              </View>
+              <View style={[nm.manualInput, inputBorderStyle('almoxarife')]}>
+                <KeyAlmoxarifeIcon size={16} color={focusedField === 'almoxarife' ? D.orange : 'rgba(255,87,34,0.45)'} />
+                <TextInput
+                  style={nm.manualInputText}
+                  placeholder="Ex: 0042"
+                  placeholderTextColor="rgba(255,255,255,0.22)"
+                  value={crachaAlmoxarife}
+                  onChangeText={v => { setCrachaAlmoxarife(v); setManualError(''); }}
+                  onFocus={() => setFocusedField('almoxarife')}
+                  onBlur={() => setFocusedField(null)}
+                  keyboardType="numeric"
+                  autoCorrect={false}
+                  editable={!submitting}
+                />
+                {crachaAlmoxarife.length > 0 && (
+                  <View style={nm.inputFilledDot} />
+                )}
+              </View>
+            </View>
+
+            {/* Indicador visual dos dois papéis */}
+            <View style={nm.rolesRow}>
+              <View style={nm.roleItem}>
+                <View style={[nm.roleIconBox, { backgroundColor: `${D.orange}18` }]}>
+                  <UserColaboradorIcon size={14} color={D.orange} />
+                </View>
+                <Text style={nm.roleLabel}>Quem retira</Text>
+              </View>
+              <View style={nm.roleArrow}>
+                <ArrowIcon size={14} color="rgba(255,255,255,0.2)" />
+              </View>
+              <View style={nm.roleItem}>
+                <View style={[nm.roleIconBox, { backgroundColor: `${D.orange}18` }]}>
+                  <KeyAlmoxarifeIcon size={14} color={D.orange} />
+                </View>
+                <Text style={nm.roleLabel}>Quem autoriza</Text>
+              </View>
+            </View>
+
+            {/* Mensagem de erro */}
+            {!!manualError && (
+              <View style={nm.manualError}>
+                <XIcon size={12} color={D.redLight} />
+                <Text style={nm.manualErrorText}>{manualError}</Text>
+              </View>
+            )}
+
+            {/* Botão de submissão */}
+            <TouchableOpacity
+              style={[
+                nm.manualSubmitBtn,
+                (submitting || (!crachaColaborador.trim() || !crachaAlmoxarife.trim())) && nm.manualSubmitBtnDisabled,
+              ]}
+              onPress={handleManualSubmit}
+              disabled={submitting || !crachaColaborador.trim() || !crachaAlmoxarife.trim()}
+              activeOpacity={0.88}
+            >
+              {submitting ? (
+                <ActivityIndicator color={D.white} size="small" />
+              ) : (
+                <>
+                  <CheckIcon size={18} color={D.white} />
+                  <Text style={nm.manualSubmitText}>Confirmar + Salvar Auditoria</Text>
+                </>
+              )}
             </TouchableOpacity>
           </KeyboardAvoidingView>
-        )}
-
-        {mode === 'manual' && nfcPhase === 'done' && (
-          <View style={nm.manualContainer}>
-            <Animated.View style={[nm.doneCard, { transform: [{ scale: successScale }] }]}>
-              <View style={nm.doneIconCircle}><CheckIcon size={32} color={D.green} /></View>
-              <Text style={nm.doneTitle}>Log Salvo + API Confirmada</Text>
-              <Text style={nm.doneSub}>{totalQty} {totalQty === 1 ? 'item retirado' : 'itens retirados'} · Auditoria registrada</Text>
-              <Animated.Text style={[nm.countdown, { transform: [{ scale: countdownAnim }] }]}>Fechando em {countdown}s</Animated.Text>
-            </Animated.View>
-          </View>
         )}
 
         <SafeAreaView edges={['bottom']} style={{ backgroundColor: D.nfcBg }} />
@@ -1229,24 +1548,79 @@ const nm = StyleSheet.create({
   doneTitle: { fontSize: 20, fontWeight: '900', color: D.white, letterSpacing: -0.3 },
   doneSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center' },
   countdown: { fontSize: 12, color: D.green, fontWeight: '700', marginTop: 4 },
-  manualContainer: { flex: 1, padding: 24, gap: 18, justifyContent: 'center' },
-  manualHeader: { alignItems: 'center', gap: 10, marginBottom: 8 },
+
+  // ── Manual container ──────────────────────────────────────────────────────
+  manualContainer: { flex: 1, padding: 22, gap: 14, justifyContent: 'center' },
+  manualHeader: { alignItems: 'center', gap: 8, marginBottom: 4 },
   manualTitle: { fontSize: 22, fontWeight: '900', color: D.white, letterSpacing: -0.3 },
-  manualSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 20 },
+  manualSub: { fontSize: 12, color: 'rgba(255,255,255,0.40)', textAlign: 'center', lineHeight: 18 },
+
   manualLoteResume: { backgroundColor: D.nfcSurface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: D.nfcBorder, gap: 8 },
   manualLoteLabel: { fontSize: 9, fontWeight: '800', color: D.orange, letterSpacing: 1.6 },
   manualLoteRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   manualLoteCode: { fontSize: 10, color: D.orange, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontWeight: '600', minWidth: 72 },
   manualLoteName: { flex: 1, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
   manualLoteQty: { fontSize: 11, fontWeight: '800', color: D.orange },
-  manualInputWrap: { gap: 8 },
-  manualInputLabel: { fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.4)', letterSpacing: 1.6 },
-  manualInput: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: D.nfcSurface, borderRadius: 12, paddingHorizontal: 16, height: 54, borderWidth: 1.5, borderColor: D.nfcBorder },
+
+  // ── Inputs ────────────────────────────────────────────────────────────────
+  manualInputWrap: { gap: 7 },
+  manualInputLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  manualInputLabel: { fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.38)', letterSpacing: 1.6, flex: 1 },
+  requiredBadge: { backgroundColor: `${D.orange}18`, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: D.orangeLine },
+  requiredText: { fontSize: 8, fontWeight: '800', color: D.orange, letterSpacing: 0.5 },
+  manualInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: D.nfcSurface,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 54,
+    // borderWidth e borderColor injetados dinamicamente
+  },
   manualInputText: { flex: 1, fontSize: 16, color: D.white, fontWeight: '600' },
-  manualError: { backgroundColor: `${D.red}18`, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: `${D.red}30` },
-  manualErrorText: { fontSize: 13, color: D.redLight, fontWeight: '600' },
-  manualSubmitBtn: { height: 58, borderRadius: 15, backgroundColor: D.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8 },
-  manualSubmitBtnDisabled: { backgroundColor: D.iron, shadowOpacity: 0 },
+  inputFilledDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: D.green,
+  },
+
+  // ── Indicador de papéis ───────────────────────────────────────────────────
+  rolesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  roleItem: { alignItems: 'center', gap: 6, flex: 1 },
+  roleIconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  roleLabel: { fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: '600', letterSpacing: 0.3 },
+  roleArrow: { paddingHorizontal: 4 },
+
+  manualError: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: `${D.red}18`, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: `${D.red}30` },
+  manualErrorText: { fontSize: 13, color: D.redLight, fontWeight: '600', flex: 1 },
+  manualSubmitBtn: {
+    height: 58,
+    borderRadius: 15,
+    backgroundColor: D.orange,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    shadowColor: D.orangeDark,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  manualSubmitBtnDisabled: { backgroundColor: 'rgba(255,87,34,0.3)', shadowOpacity: 0 },
   manualSubmitText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
 });
 
@@ -1285,16 +1659,13 @@ export default function AlmoxarifadoScreen() {
       const todas: Ferramenta[] = todasRes.status === 'fulfilled' ? (todasRes.value ?? []) : [];
       const minhas: Ferramenta[] = minhasRes.status === 'fulfilled' ? (minhasRes.value ?? []) : [];
 
-      // Injeta timestamp de custódia em cada ferramenta "Em uso"
       const minhasComTimer = minhas
         .filter((f: Ferramenta) => f.status === 'Em uso')
         .map((f: Ferramenta) => ({
           ...f,
-          // Se já existe registro local, usa; caso contrário cria agora
           custodiaDesde: custodyTs[f.codigo] ?? Date.now(),
         }));
 
-      // Atualiza timestamps para novas entradas
       const newTs = { ...custodyTs };
       minhasComTimer.forEach(f => { if (!newTs[f.codigo]) newTs[f.codigo] = f.custodiaDesde!; });
       await saveCustodyTimestamps(newTs);
@@ -1326,17 +1697,14 @@ export default function AlmoxarifadoScreen() {
     setLote(prev => prev.map(i => i.codigo === codigo ? { ...i, qty: Math.max(1, i.qty + delta) } : i));
   };
 
-  // ── [2] Callback: registra na API + salva log de auditoria local ─────────────
   const handleLibSuccess = async (crachaColaborador: string, metodo: 'NFC' | 'MANUAL') => {
     const crachaAlmoxarife = await AsyncStorage.getItem('userCracha') ?? 'desconhecido';
 
-    // 1. Chama API
     await apiClient.retirar({
       cracha_colaborador: crachaColaborador,
       ferramentas: lote.map(f => ({ codigo: f.codigo, qtd: f.qty, checklist: 'REALIZADO', observacao: 'Retirada via app Marilan' })),
     });
 
-    // 2. Monta e salva log de auditoria local
     const log: AuditLog = {
       id: genId(),
       timestamp: Date.now(),
@@ -1348,12 +1716,10 @@ export default function AlmoxarifadoScreen() {
     };
     await saveAuditLog(log);
 
-    // 3. Registra timestamps de custódia para as ferramentas retiradas
     const custodyTs = await loadCustodyTimestamps();
     lote.forEach(f => { custodyTs[f.codigo] = Date.now(); });
     await saveCustodyTimestamps(custodyTs);
 
-    // 4. Limpa lote, toast, recarrega
     setLote([]);
     showToast(`✅ ${lote.length} ${lote.length === 1 ? 'ferramenta retirada' : 'ferramentas retiradas'} · Log salvo`, 'success');
     await loadData();
@@ -1369,22 +1735,18 @@ export default function AlmoxarifadoScreen() {
   const isInLote = (codigo: string) => lote.some(i => i.codigo === codigo);
   const totalQty = lote.reduce((a, c) => a + c.qty, 0);
   const headerTY = headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] });
-
-  // Calcula "atrasos" (ferramentas em custódia > 4h)
   const atrasos = minhasFerramentas.filter(f => f.custodiaDesde && (Date.now() - f.custodiaDesde) > 4 * 60 * 60 * 1000).length;
 
   return (
     <View style={s.root}>
       <StatusBar barStyle="light-content" backgroundColor={D.orange} />
 
-      {/* ── Header ─────────────────────────────────────────────────── */}
       <SafeAreaView style={s.headerZone} edges={['top']}>
         <View style={s.geoDeco} pointerEvents="none">
           {Array.from({ length: 15 }).map((_, i) => (
             <View key={i} style={[s.geoDot, { opacity: i % 3 === 0 ? 0.22 : 0.10 }]} />
           ))}
         </View>
-
         <Animated.View style={[s.header, { opacity: headerAnim, transform: [{ translateY: headerTY }] }]}>
           <View style={s.headerRow}>
             <View>
@@ -1398,8 +1760,6 @@ export default function AlmoxarifadoScreen() {
               </Svg>
             </TouchableOpacity>
           </View>
-
-          {/* [4] Card Status do Turno */}
           <ShiftStatusCard
             emUso={minhasFerramentas.length}
             disponiveis={disponíveis.length}
@@ -1411,21 +1771,17 @@ export default function AlmoxarifadoScreen() {
         </Animated.View>
       </SafeAreaView>
 
-      {/* ── Body ────────────────────────────────────────────────────── */}
       <ScrollView
         style={s.body}
         contentContainerStyle={[s.bodyContent, { paddingBottom: lote.length > 0 ? 130 : 40 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Minhas ferramentas com cronômetro + localizar */}
         {minhasFerramentas.length > 0 && (
           <View style={s.section}>
             <MyToolsSection items={minhasFerramentas} onDevolver={handleDevolver} />
           </View>
         )}
-
-        {/* Lote atual */}
         {lote.length > 0 && (
           <View style={s.section}>
             <SectionHdr label="Lote de Retirada" count={totalQty} color={D.orange} />
@@ -1438,8 +1794,6 @@ export default function AlmoxarifadoScreen() {
             </View>
           </View>
         )}
-
-        {/* Ferramentas disponíveis */}
         <View style={s.section}>
           <SectionHdr label="Ativos Disponíveis" count={disponíveis.length} color={D.greenLight} />
           {loading ? (
@@ -1461,21 +1815,14 @@ export default function AlmoxarifadoScreen() {
         </View>
       </ScrollView>
 
-      {/* FAB */}
       <LoteFooter count={totalQty} onSolicitar={() => setLibModalVisible(true)} anim={fabAnim} />
-
-      {/* Modal de Liberação */}
       <LibModal visible={libModalVisible} lote={lote} onClose={() => setLibModalVisible(false)} onSuccess={handleLibSuccess} />
-
-      {/* [2] Modal de Auditoria */}
       <AuditLogModal visible={auditLogVisible} onClose={() => setAuditLogVisible(false)} />
-
       <Toast message={toastState.msg} visible={toastState.visible} type={toastState.type} />
     </View>
   );
 }
 
-// ─── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: D.orange },
   headerZone: { backgroundColor: D.orange, overflow: 'hidden' },

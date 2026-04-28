@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance } from 'axios';
 import * as FileSystem from 'expo-file-system';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = 'https://inf-viewpicture-database-blowing.trycloudflare.com/api';
 
 interface LoginRequest {
   cracha: string;

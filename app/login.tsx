@@ -1,6 +1,6 @@
 /**
- * app/login.tsx — Marilan v2 Premium
- * Design: Industrial Precision · Laranja Marilan + Branco
+ * app/login.tsx — Marilan · Flat Design 2.0
+ * Clean, geometric, logo-ready header
  */
 
 import { useRouter } from 'expo-router';
@@ -9,6 +9,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Image,
   KeyboardAvoidingView,
   Platform,
   StatusBar,
@@ -19,58 +20,88 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { apiClient } from '../services/api';
 
-const { width: SW, height: SH } = Dimensions.get('window');
+const { width: SW } = Dimensions.get('window');
 
-// ─── Design System ────────────────────────────────────────────────────────────
-const D = {
+// ─── Design Tokens ────────────────────────────────────────────────────────────
+const C = {
   orange: '#F05A00',
-  orange2: '#FF7A2F',
-  orange3: '#FF9A5C',
-  orangeGlow: 'rgba(240,90,0,0.18)',
-  orangeDark: '#B84400',
+  orangeLight: '#FF7A30',
+  orangePale: 'rgba(240,90,0,0.08)',
   white: '#FFFFFF',
-  offWhite: '#FDF8F5',
-  paper: '#FFF4EE',
-  gray100: '#F2F0EE',
-  gray200: '#E6E2DE',
-  gray300: '#C8C2BB',
-  gray500: '#7A736A',
-  gray700: '#3A332B',
-  black: '#1A1510',
+  offWhite: '#F9F7F5',
+  gray100: '#F0EDE9',
+  gray200: '#DDD8D2',
+  gray400: '#A09890',
+  gray600: '#6A6058',
+  black: '#1C1714',
   error: '#D93B2B',
-  errorBg: 'rgba(217,59,43,0.08)',
+  errorPale: 'rgba(217,59,43,0.07)',
 };
 
-// ─── SVG Icons ─────────────────────────────────────────────────────────────────
-const EyeIcon = ({ open, color = D.orange }: { open: boolean; color?: string }) => (
-  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-    {open ? (
-      <>
-        <Path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-        <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={1.8} />
-      </>
-    ) : (
-      <>
-        <Path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <Path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-        <Path d="M1 1l22 22" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-      </>
-    )}
-  </Svg>
-);
+// ─── Geometric Background Dots ─────────────────────────────────────────────────
+// A grid of circles — pure flat, no gradients
+function DotGrid() {
+  const cols = 7;
+  const rows = 5;
+  const gap = SW / (cols + 1);
 
-const ShieldIcon = ({ size = 32 }: { size?: number }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.6)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-    <Path d="M9 12l2 2 4-4" stroke="rgba(255,255,255,0.9)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-  </Svg>
-);
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {Array.from({ length: rows }).map((_, r) =>
+        Array.from({ length: cols }).map((_, c) => {
+          const size = (r + c) % 3 === 0 ? 8 : (r + c) % 3 === 1 ? 5 : 3;
+          const opacity = (r + c) % 3 === 0 ? 0.18 : (r + c) % 3 === 1 ? 0.10 : 0.06;
+          return (
+            <View
+              key={`${r}-${c}`}
+              style={{
+                position: 'absolute',
+                width: size,
+                height: size,
+                borderRadius: size / 2,
+                backgroundColor: C.white,
+                opacity,
+                left: gap * (c + 1) - size / 2,
+                top: 28 + gap * 0.8 * (r + 1) - size / 2,
+              }}
+            />
+          );
+        })
+      )}
+      {/* Accent larger circles */}
+      <View style={{ position: 'absolute', width: 48, height: 48, borderRadius: 24, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.12)', right: 28, top: 24 }} />
+      <View style={{ position: 'absolute', width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.12)', right: 66, top: 60 }} />
+      <View style={{ position: 'absolute', width: 16, height: 16, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.10)', left: 24, top: 40 }} />
+      <View style={{ position: 'absolute', width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', left: 52, top: 70 }} />
+    </View>
+  );
+}
 
-// ─── Animated Input ────────────────────────────────────────────────────────────
-function PremiumInput({
+// ─── Eye Icon ─────────────────────────────────────────────────────────────────
+function EyeIcon({ open }: { open: boolean }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+      {open ? (
+        <>
+          <Path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke={C.gray400} strokeWidth={1.8} strokeLinecap="round" />
+          <Circle cx={12} cy={12} r={3} stroke={C.gray400} strokeWidth={1.8} />
+        </>
+      ) : (
+        <>
+          <Path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" stroke={C.gray400} strokeWidth={1.8} strokeLinecap="round" />
+          <Path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" stroke={C.gray400} strokeWidth={1.8} strokeLinecap="round" />
+          <Path d="M1 1l22 22" stroke={C.gray400} strokeWidth={1.8} strokeLinecap="round" />
+        </>
+      )}
+    </Svg>
+  );
+}
+
+// ─── Input Field ──────────────────────────────────────────────────────────────
+function Field({
   label,
   value,
   onChangeText,
@@ -89,53 +120,42 @@ function PremiumInput({
 }) {
   const [focused, setFocused] = useState(false);
   const [showPass, setShowPass] = useState(false);
-  const floatAnim = useRef(new Animated.Value(value ? 1 : 0)).current;
-  const borderAnim = useRef(new Animated.Value(0)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
+  const focusAnim = useRef(new Animated.Value(0)).current;
 
-  const animate = (to: number) => {
-    Animated.parallel([
-      Animated.spring(floatAnim, { toValue: (value || to) ? 1 : 0, useNativeDriver: false, tension: 200, friction: 18 }),
-      Animated.timing(borderAnim, { toValue: to, duration: 200, useNativeDriver: false }),
-      Animated.timing(glowAnim, { toValue: to, duration: 300, useNativeDriver: false }),
-    ]).start();
+  const onFocus = () => {
+    setFocused(true);
+    Animated.timing(focusAnim, { toValue: 1, duration: 180, useNativeDriver: false }).start();
+  };
+  const onBlur = () => {
+    setFocused(false);
+    Animated.timing(focusAnim, { toValue: 0, duration: 180, useNativeDriver: false }).start();
   };
 
-  useEffect(() => {
-    if (value) Animated.timing(floatAnim, { toValue: 1, duration: 1, useNativeDriver: false }).start();
-  }, []);
-
-  const labelY = floatAnim.interpolate({ inputRange: [0, 1], outputRange: [19, 6] });
-  const labelSize = floatAnim.interpolate({ inputRange: [0, 1], outputRange: [15.5, 10.5] });
-  const labelColor = floatAnim.interpolate({ inputRange: [0, 1], outputRange: [D.gray300, focused ? D.orange : D.gray500] });
-  const borderColor = borderAnim.interpolate({ inputRange: [0, 1], outputRange: [D.gray200, D.orange] });
-  const glowOpacity = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+  const borderColor = focusAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [C.gray200, C.orange],
+  });
 
   return (
-    <View>
-      <Animated.View style={[inp.glow, { opacity: glowOpacity }]} />
-      <Animated.View style={[inp.wrap, { borderColor }]}>
-        {icon && <View style={inp.iconLeft}>{icon}</View>}
-        <View style={inp.inner}>
-          <Animated.Text style={[inp.label, ({ top: labelY, fontSize: labelSize, color: labelColor } as any), icon ? { left: 0 } : undefined]}> 
-            {label}
-          </Animated.Text>
-            <TextInput
-            style={[inp.field, icon ? { paddingLeft: 0 } : undefined]}
-            value={value}
-            onChangeText={onChangeText}
-            onFocus={() => { setFocused(true); animate(1); }}
-            onBlur={() => { setFocused(false); animate(0); }}
-            secureTextEntry={secure && !showPass}
-            keyboardType={keyboardType}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={editable}
-            placeholderTextColor="transparent"
-          />
-        </View>
+    <View style={fi.wrap}>
+      <Text style={fi.label}>{label}</Text>
+      <Animated.View style={[fi.box, { borderColor }]}>
+        {icon && <View style={fi.iconLeft}>{icon}</View>}
+        <TextInput
+          style={fi.input}
+          value={value}
+          onChangeText={onChangeText}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          secureTextEntry={secure && !showPass}
+          keyboardType={keyboardType}
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={editable}
+          placeholderTextColor={C.gray400}
+        />
         {secure && (
-          <TouchableOpacity onPress={() => setShowPass(v => !v)} style={inp.eyeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <TouchableOpacity onPress={() => setShowPass(v => !v)} style={fi.eye} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <EyeIcon open={showPass} />
           </TouchableOpacity>
         )}
@@ -144,130 +164,33 @@ function PremiumInput({
   );
 }
 
-const inp = StyleSheet.create({
-  glow: {
-    position: 'absolute',
-    top: -4,
-    left: -4,
-    right: -4,
-    bottom: -4,
-    borderRadius: 20,
-    backgroundColor: D.orangeGlow,
-    zIndex: -1,
+const fi = StyleSheet.create({
+  wrap: { gap: 7 },
+  label: { fontSize: 11, fontWeight: '700', color: C.gray600, letterSpacing: 0.8, textTransform: 'uppercase' },
+  box: {
+    flexDirection: 'row', alignItems: 'center',
+    height: 54, borderRadius: 12, borderWidth: 1.5,
+    backgroundColor: C.white, paddingHorizontal: 14, gap: 10,
   },
-  wrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 62,
-    borderWidth: 1.5,
-    borderRadius: 16,
-    backgroundColor: D.white,
-    paddingHorizontal: 18,
-    overflow: 'hidden',
-  },
-  iconLeft: { marginRight: 12, opacity: 0.5 },
-  inner: { flex: 1, position: 'relative' },
-  label: {
-    position: 'absolute',
-    left: 0,
-    fontWeight: '500',
-    letterSpacing: 0.2,
-  },
-  field: {
-    fontSize: 16,
-    color: D.black,
-    fontWeight: '500',
-    paddingTop: 22,
-    paddingBottom: 6,
-    letterSpacing: 0.3,
-  },
-  eyeBtn: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  iconLeft: { opacity: 0.45 },
+  input: { flex: 1, fontSize: 15, color: C.black, fontWeight: '500' },
+  eye: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
 });
 
-// ─── Loading Dots ─────────────────────────────────────────────────────────────
-function LoadingDots() {
-  const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
-
+// ─── Loading Spinner ──────────────────────────────────────────────────────────
+function Spinner() {
+  const rot = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    const anims = dots.map((d, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(i * 120),
-          Animated.timing(d, { toValue: 1, duration: 280, useNativeDriver: true }),
-          Animated.timing(d, { toValue: 0, duration: 280, useNativeDriver: true }),
-          Animated.delay((dots.length - i) * 120),
-        ])
-      )
-    );
-    anims.forEach(a => a.start());
-    return () => anims.forEach(a => a.stop());
+    Animated.loop(
+      Animated.timing(rot, { toValue: 1, duration: 800, easing: Easing.linear, useNativeDriver: true })
+    ).start();
   }, []);
-
   return (
-    <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
-      <Text style={{ fontSize: 15, fontWeight: '700', color: D.white, marginRight: 2 }}>Autenticando</Text>
-      {dots.map((d, i) => (
-        <Animated.View key={i} style={{
-          width: 5, height: 5, borderRadius: 2.5, backgroundColor: D.white,
-          opacity: d,
-          transform: [{ translateY: d.interpolate({ inputRange: [0, 1], outputRange: [0, -3] }) }]
-        }} />
-      ))}
-    </View>
-  );
-}
-
-// ─── Decorative Background Shapes ────────────────────────────────────────────
-function BgShapes({ anim }: { anim: Animated.Value }) {
-  const rotate = anim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '8deg'] });
-  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.04] });
-
-  return (
-    <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ rotate }, { scale }] }]} pointerEvents="none">
-      {/* Large circle top-right */}
-      <View style={{
-        position: 'absolute',
-        width: SW * 0.8,
-        height: SW * 0.8,
-        borderRadius: SW * 0.4,
-        backgroundColor: D.orange2,
-        opacity: 0.18,
-        top: -SW * 0.35,
-        right: -SW * 0.22,
-      }} />
-      {/* Medium circle top-left */}
-      <View style={{
-        position: 'absolute',
-        width: SW * 0.55,
-        height: SW * 0.55,
-        borderRadius: SW * 0.275,
-        backgroundColor: D.orangeDark,
-        opacity: 0.14,
-        top: -SW * 0.1,
-        left: -SW * 0.2,
-      }} />
-      {/* Small accent dot */}
-      <View style={{
-        position: 'absolute',
-        width: 14, height: 14, borderRadius: 7,
-        backgroundColor: D.white,
-        opacity: 0.25,
-        top: SH * 0.28,
-        right: 32,
-      }} />
-      <View style={{
-        position: 'absolute',
-        width: 8, height: 8, borderRadius: 4,
-        backgroundColor: D.white,
-        opacity: 0.2,
-        top: SH * 0.22,
-        left: 48,
-      }} />
+    <Animated.View style={{ transform: [{ rotate: rot.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }] }}>
+      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+        <Circle cx={12} cy={12} r={9} stroke="rgba(255,255,255,0.3)" strokeWidth={2.5} />
+        <Path d="M12 3a9 9 0 0 1 9 9" stroke={C.white} strokeWidth={2.5} strokeLinecap="round" />
+      </Svg>
     </Animated.View>
   );
 }
@@ -280,36 +203,28 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Entrance animations
-  const bgAnim = useRef(new Animated.Value(0)).current;
+  // Entrance anims
   const headerAnim = useRef(new Animated.Value(0)).current;
-  const cardAnim = useRef(new Animated.Value(60)).current;
+  const logoAnim = useRef(new Animated.Value(-20)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const cardAnim = useRef(new Animated.Value(40)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
-  const formAnim = useRef(new Animated.Value(30)).current;
-  const formOpacity = useRef(new Animated.Value(0)).current;
-  const btnAnim = useRef(new Animated.Value(20)).current;
-  const btnOpacity = useRef(new Animated.Value(0)).current;
-  const btnScale = useRef(new Animated.Value(1)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
+  const btnScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.sequence([
-      Animated.timing(bgAnim, { toValue: 1, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(headerAnim, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       Animated.parallel([
-        Animated.spring(cardAnim, { toValue: 0, tension: 70, friction: 12, useNativeDriver: true }),
+        Animated.spring(logoAnim, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
+        Animated.timing(logoOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.spring(cardAnim, { toValue: 0, tension: 70, friction: 13, useNativeDriver: true }),
         Animated.timing(cardOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
-      ]),
-      Animated.parallel([
-        Animated.spring(formAnim, { toValue: 0, tension: 80, friction: 13, useNativeDriver: true }),
-        Animated.timing(formOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
-      ]),
-      Animated.parallel([
-        Animated.spring(btnAnim, { toValue: 0, tension: 100, friction: 12, useNativeDriver: true }),
-        Animated.timing(btnOpacity, { toValue: 1, duration: 260, useNativeDriver: true }),
       ]),
     ]).start();
 
-    // Check auth
     apiClient.initialize().then(() => {
       if (apiClient.isAuthenticated()) router.replace('/(tabs)/ferramentas');
     });
@@ -317,20 +232,19 @@ export default function LoginScreen() {
 
   const shake = () => {
     shakeAnim.setValue(0);
-    Animated.sequence([
-      ...([1, -1, 1, -1, 1, 0].map(v =>
-        Animated.timing(shakeAnim, { toValue: v * 8, duration: 60, useNativeDriver: true })
-      ))
-    ]).start();
+    Animated.sequence(
+      [1, -1, 1, -1, 0.5, 0].map(v =>
+        Animated.timing(shakeAnim, { toValue: v * 9, duration: 58, useNativeDriver: true })
+      )
+    ).start();
   };
 
   const handleLogin = async () => {
     if (!cracha.trim()) { setError('Informe o número do crachá'); shake(); return; }
     if (!password.trim()) { setError('Informe a senha'); shake(); return; }
 
-    // Button press animation
     Animated.sequence([
-      Animated.timing(btnScale, { toValue: 0.965, duration: 80, useNativeDriver: true }),
+      Animated.timing(btnScale, { toValue: 0.96, duration: 70, useNativeDriver: true }),
       Animated.spring(btnScale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
     ]).start();
 
@@ -338,7 +252,7 @@ export default function LoginScreen() {
       setError('');
       setLoading(true);
       await apiClient.login(cracha.trim(), password);
-      setTimeout(() => router.replace('/(tabs)/ferramentas'), 300);
+      setTimeout(() => router.replace('/(tabs)/ferramentas'), 280);
     } catch (err: any) {
       setError(err.message || 'Credenciais inválidas. Tente novamente.');
       setPassword('');
@@ -348,135 +262,120 @@ export default function LoginScreen() {
     }
   };
 
-  const headerScale = bgAnim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
-
   return (
     <View style={s.root}>
-      <StatusBar barStyle="light-content" backgroundColor={D.orange} />
+      <StatusBar barStyle="light-content" backgroundColor={C.orange} />
 
-      {/* Header Orange Zone */}
-      <SafeAreaView style={s.headerZone} edges={['top']}>
-        <BgShapes anim={bgAnim} />
-        <Animated.View style={[s.headerContent, { opacity: bgAnim, transform: [{ scale: headerScale }] }]}>
-          {/* Logo */}
-          <View style={s.logoRow}>
-            <View style={s.logoMark}>
-              <Svg width={38} height={38} viewBox="0 0 38 38">
-                <Defs>
-                  <LinearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-                    <Stop offset="0" stopColor="#FFFFFF" stopOpacity="1" />
-                    <Stop offset="1" stopColor="#FFE0CC" stopOpacity="1" />
-                  </LinearGradient>
-                </Defs>
-                <Rect x={1} y={1} width={36} height={36} rx={10} fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
-                <Path d="M10 27V13l9-5 9 5v14" stroke="url(#lg)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-                <Path d="M19 27V19" stroke="url(#lg)" strokeWidth={2} strokeLinecap="round" />
-                <Path d="M14 22h10" stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} strokeLinecap="round" />
-              </Svg>
-            </View>
-            <View>
-              <Text style={s.logoName}>MARILAN</Text>
-              <Text style={s.logoSub}>Gestão de Ferramentas</Text>
+      {/* ── Orange Header Zone ─────────────────────────────────────────── */}
+      <Animated.View style={[s.header, { opacity: headerAnim }]}>
+        <SafeAreaView edges={['top']} style={{ flex: 1 }}>
+          <DotGrid />
+
+          {/* Logo slot — centered, prominent */}
+          <Animated.View style={[s.logoArea, {
+            opacity: logoOpacity,
+            transform: [{ translateY: logoAnim }],
+          }]}>
+
+            <Image
+              source={require('../assets/images/marilan-branco1.png')}
+              style={s.logoImage}
+              resizeMode="contain"
+            />
+
+            <Text style={s.tagline}>Gestão de Ferramentas</Text>
+          </Animated.View>
+
+          {/* Bottom notch row */}
+          <View style={s.headerBottom}>
+            <View style={s.pill}>
+              <View style={s.pillDot} />
+              <Text style={s.pillText}>Acesso corporativo</Text>
             </View>
           </View>
+        </SafeAreaView>
+      </Animated.View>
 
-          {/* Shield */}
-          <View style={s.shieldRow}>
-            <ShieldIcon size={30} />
-            <Text style={s.shieldText}>Acesso Seguro · SSL</Text>
-          </View>
-        </Animated.View>
-      </SafeAreaView>
-
-      {/* Card */}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.cardZone}>
+      {/* ── White Card ────────────────────────────────────────────────── */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Animated.View style={[s.card, {
-          transform: [{ translateY: cardAnim }, { translateX: shakeAnim }],
           opacity: cardOpacity,
+          transform: [{ translateY: cardAnim }, { translateX: shakeAnim }],
         }]}>
-          {/* Card notch indicator */}
           <View style={s.cardHandle} />
 
-          <Text style={s.cardTitle}>Bem-vindo</Text>
-          <Text style={s.cardSub}>Identificação obrigatória para acesso</Text>
+          <Text style={s.cardTitle}>Entrar</Text>
+          <Text style={s.cardSub}>Identifique-se para acessar o sistema</Text>
 
           {/* Error */}
           {!!error && (
-            <Animated.View style={s.errorBox}>
-              <View style={s.errorDot} />
+            <View style={s.errorBox}>
+              <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                <Circle cx={12} cy={12} r={9} stroke={C.error} strokeWidth={2} />
+                <Path d="M12 8v4M12 16h.01" stroke={C.error} strokeWidth={2} strokeLinecap="round" />
+              </Svg>
               <Text style={s.errorText}>{error}</Text>
-            </Animated.View>
+            </View>
           )}
 
-          {/* Form */}
-          <Animated.View style={[s.form, {
-            transform: [{ translateY: formAnim }],
-            opacity: formOpacity,
-          }]}>
-            <PremiumInput
-              label="Número do Crachá"
+          {/* Fields */}
+          <View style={s.form}>
+            <Field
+              label="Nº do Crachá"
               value={cracha}
               onChangeText={v => { setCracha(v); setError(''); }}
               keyboardType="numeric"
               editable={!loading}
               icon={
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
-                  <Circle cx={9} cy={12} r={2.5} stroke={D.orange} strokeWidth={1.6} />
-                  <Path d="M14 10h4M14 14h3" stroke={D.orange} strokeWidth={1.6} strokeLinecap="round" />
+                <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
+                  <Rect x={2} y={5} width={20} height={14} rx={2} stroke={C.orange} strokeWidth={1.8} />
+                  <Circle cx={9} cy={12} r={2.5} stroke={C.orange} strokeWidth={1.7} />
+                  <Path d="M14 10h4M14 14h3" stroke={C.orange} strokeWidth={1.5} strokeLinecap="round" />
                 </Svg>
               }
             />
-            <PremiumInput
+            <Field
               label="Senha"
               value={password}
               onChangeText={v => { setPassword(v); setError(''); }}
               secure
               editable={!loading}
               icon={
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Rect x={3} y={11} width={18} height={11} rx={2} stroke={D.orange} strokeWidth={1.8} />
-                  <Path d="M7 11V7a5 5 0 0 1 10 0v4" stroke={D.orange} strokeWidth={1.8} strokeLinecap="round" />
-                  <Circle cx={12} cy={16} r={1.5} fill={D.orange} />
+                <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
+                  <Rect x={3} y={11} width={18} height={11} rx={2} stroke={C.orange} strokeWidth={1.8} />
+                  <Path d="M7 11V7a5 5 0 0 1 10 0v4" stroke={C.orange} strokeWidth={1.8} strokeLinecap="round" />
+                  <Circle cx={12} cy={16} r={1.5} fill={C.orange} />
                 </Svg>
               }
             />
-            <TouchableOpacity style={s.forgotRow} disabled={loading} activeOpacity={0.65}>
-              <Text style={s.forgotText}>Esqueceu sua senha?</Text>
-            </TouchableOpacity>
-          </Animated.View>
+          </View>
 
-          {/* Login Button */}
-          <Animated.View style={[s.btnWrap, {
-            transform: [{ translateY: btnAnim }, { scale: btnScale }],
-            opacity: btnOpacity,
-          }]}>
+          {/* CTA */}
+          <Animated.View style={{ transform: [{ scale: btnScale }], marginTop: 28 }}>
             <TouchableOpacity
-              style={[s.loginBtn, loading && s.loginBtnActive]}
+              style={[s.btn, loading && s.btnLoading]}
               onPress={handleLogin}
               disabled={loading}
-              activeOpacity={0.9}
+              activeOpacity={0.88}
             >
-              {/* Gradient shimmer overlay */}
-              <View style={s.btnShimmer} />
-              {loading
-                ? <LoadingDots />
-                : (
-                  <>
-                    <Text style={s.loginBtnText}>Entrar no Sistema</Text>
-                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                      <Path d="M5 12h14M12 5l7 7-7 7" stroke={D.white} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
-                    </Svg>
-                  </>
-                )
-              }
+              {loading ? (
+                <Spinner />
+              ) : (
+                <>
+                  <Text style={s.btnText}>Entrar no Sistema</Text>
+                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                    <Path d="M5 12h14M12 5l7 7-7 7" stroke={C.white} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+                  </Svg>
+                </>
+              )}
             </TouchableOpacity>
           </Animated.View>
 
-          {/* Footer note */}
-          <View style={s.footerNote}>
-            <View style={s.footerDot} />
-            <Text style={s.footerText}>Sistema restrito · Marilan © 2026</Text>
+          {/* Footer */}
+          <View style={s.footer}>
+            <View style={s.footerLine} />
+            <Text style={s.footerText}>Marilan · Sistema Restrito · 2026</Text>
+            <View style={s.footerLine} />
           </View>
         </Animated.View>
       </KeyboardAvoidingView>
@@ -486,195 +385,188 @@ export default function LoginScreen() {
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: D.orange },
+  root: { flex: 1, backgroundColor: C.orange },
 
-  headerZone: {
-    backgroundColor: D.orange,
-    paddingBottom: 12,
+  // Header
+  header: {
+    height: 310,
+    backgroundColor: C.orange,
     overflow: 'hidden',
   },
-  headerContent: {
-    paddingHorizontal: 28,
-    paddingTop: 10,
-    paddingBottom: 20,
-    gap: 18,
-  },
-  logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  logoMark: {
-    width: 60,
-    height: 60,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.22)',
+
+  // Logo zone — all the space above the card
+  logoArea: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingTop: 16,
+    gap: 10,
   },
-  logoName: {
-    fontSize: 26,
-    fontWeight: '900',
-    color: D.white,
-    letterSpacing: 4,
+
+  // ─── PARA USAR A LOGO REAL, descomente e ajuste o tamanho: ───────────────
+   logoImage: {
+   width: 220,
+  height: 72,
+   },
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Placeholder (remova quando tiver a logo)
+  logoPlaceholder: {
+    width: 220,
+    height: 72,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderStyle: 'dashed',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
   },
-  logoSub: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.65)',
+  logoPlaceholderText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 1.5,
+  },
+  logoPlaceholderSub: {
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.45)',
+    fontWeight: '500',
+  },
+
+  tagline: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
     fontWeight: '600',
-    letterSpacing: 1.2,
+    letterSpacing: 1.6,
     textTransform: 'uppercase',
     marginTop: 2,
   },
-  shieldRow: {
+
+  headerBottom: {
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+    alignItems: 'flex-start',
+  },
+  pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    alignSelf: 'flex-start',
+    gap: 7,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 99,
+    paddingVertical: 6,
+    paddingHorizontal: 13,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
   },
-  shieldText: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
+  pillDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#5CFF9A',
+  },
+  pillText: {
+    fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 0.4,
+    color: 'rgba(255,255,255,0.75)',
+    letterSpacing: 0.3,
   },
 
-  cardZone: { flex: 1 },
+  // Card
   card: {
     flex: 1,
-    backgroundColor: D.white,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingHorizontal: 28,
-    paddingTop: 10,
+    backgroundColor: C.offWhite,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 26,
     paddingBottom: 40,
-    shadowColor: '#1A1510',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    elevation: 16,
+    // subtle flat shadow via border
+    borderTopWidth: 1,
+    borderLeftWidth: 0.5,
+    borderRightWidth: 0.5,
+    borderColor: C.gray200,
   },
   cardHandle: {
-    width: 44,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: D.gray200,
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: C.gray200,
     alignSelf: 'center',
-    marginBottom: 28,
-    marginTop: 4,
+    marginTop: 12,
+    marginBottom: 26,
   },
   cardTitle: {
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: '900',
-    color: D.black,
-    letterSpacing: -0.5,
+    color: C.black,
+    letterSpacing: -0.6,
   },
   cardSub: {
-    fontSize: 14,
-    color: D.gray500,
-    marginTop: 4,
+    fontSize: 13,
+    color: C.gray400,
+    marginTop: 5,
     marginBottom: 24,
     fontWeight: '400',
-    letterSpacing: 0.1,
   },
 
+  // Error
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: D.errorBg,
-    borderLeftWidth: 3,
-    borderLeftColor: D.error,
+    gap: 9,
+    backgroundColor: C.errorPale,
     borderRadius: 10,
-    paddingVertical: 12,
+    paddingVertical: 11,
     paddingHorizontal: 14,
-    marginBottom: 20,
-  },
-  errorDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: D.error,
+    marginBottom: 18,
+    borderLeftWidth: 3,
+    borderLeftColor: C.error,
   },
   errorText: {
     fontSize: 13,
-    color: D.error,
+    color: C.error,
     fontWeight: '600',
     flex: 1,
-    letterSpacing: 0.1,
   },
 
-  form: { gap: 14 },
-  forgotRow: {
-    alignSelf: 'flex-end',
-    paddingVertical: 4,
-    marginTop: -2,
-  },
-  forgotText: {
-    fontSize: 13,
-    color: D.orange,
-    fontWeight: '600',
-    letterSpacing: 0.1,
-  },
+  // Form
+  form: { gap: 16 },
 
-  btnWrap: { marginTop: 28 },
-  loginBtn: {
-    height: 60,
-    borderRadius: 18,
-    backgroundColor: D.orange,
+  // Button
+  btn: {
+    height: 56,
+    borderRadius: 14,
+    backgroundColor: C.orange,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    overflow: 'hidden',
-    shadowColor: D.orangeDark,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 8,
   },
-  loginBtnActive: { backgroundColor: D.orangeDark },
-  btnShimmer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '55%',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 18,
-  },
-  loginBtnText: {
-    fontSize: 17,
+  btnLoading: { backgroundColor: C.orangeLight },
+  btnText: {
+    fontSize: 16,
     fontWeight: '800',
-    color: D.white,
-    letterSpacing: 0.3,
+    color: C.white,
+    letterSpacing: 0.2,
   },
 
-  footerNote: {
+  // Footer
+  footer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 28,
+    gap: 12,
+    marginTop: 32,
   },
-  footerDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: D.gray300,
+  footerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: C.gray200,
   },
   footerText: {
-    fontSize: 11,
-    color: D.gray300,
+    fontSize: 10,
+    color: C.gray400,
     fontWeight: '500',
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
   },
 });

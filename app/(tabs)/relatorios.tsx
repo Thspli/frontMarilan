@@ -346,8 +346,8 @@ export default function RelatoriosScreen() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Inventário');
       const b64  = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const path = (cacheDirectory || '') + 'Inventario_Ferramentas.xlsx';
-      await writeAsStringAsync(path, b64, { encoding: EncodingType.Base64 });
+      const path = (FileSystem.cacheDirectory || '') + 'Inventario_Ferramentas.xlsx';
+      await FileSystem.writeAsStringAsync(path, b64, { encoding: FileSystem.EncodingType.Base64 });
       const ok = await Sharing.isAvailableAsync();
       if (ok) {
         await Sharing.shareAsync(path);

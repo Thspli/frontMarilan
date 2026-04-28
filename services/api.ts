@@ -66,6 +66,15 @@ export interface Ferramenta {
 export class APIClient {
   private api: AxiosInstance;
   private token: string | null = null;
+  
+  async resolverNFC(nfcId: string): Promise<{ cracha: string; nome: string }> {
+    try {
+      const response = await this.api.get(`/usuario/por-nfc/${nfcId}`);
+      return response.data;
+    } catch (error) {
+      throw new Error('Tag NFC não vinculada a nenhum colaborador');
+    }
+  }
 
   constructor() {
     this.api = axios.create({
@@ -92,6 +101,8 @@ export class APIClient {
         return Promise.reject(error);
       }
     );
+
+    
   }
 
   /**

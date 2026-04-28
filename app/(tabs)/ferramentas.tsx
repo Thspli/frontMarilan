@@ -239,14 +239,18 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
   useEffect(() => {
     if (visible) {
       setCracha(''); setObs(''); setLoading(false);
-      nfcService.readTag().catch(() => {});
-      Animated.parallel([
-        Animated.spring(slideY, { toValue: 0, tension: 68, friction: 13, useNativeDriver: true }),
-        Animated.timing(bgOp, { toValue: 1, duration: 280, useNativeDriver: true }),
-      ]).start();
-    } else {
-      slideY.setValue(400);
-      bgOp.setValue(0);
+  
+      nfcService.readTag().then(async (result) => {
+        if (result.success && result.data) {
+          try {
+            const usuario = await apiClient.resolverNFC(result.data);
+            setCracha(usuario.cracha);
+            Alert.alert('NFC Detectado', `Colaborador: ${usuario.nome}`);
+          } catch {
+            Alert.alert('NFC', 'Tag não vinculada a nenhum colaborador');
+          }
+        }
+      }).catch(() => {});
     }
   }, [visible]);
 

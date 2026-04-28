@@ -6,6 +6,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance } from 'axios';
+import * as FileSystem from 'expo-file-system';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -53,7 +54,8 @@ interface TrocarRequest {
   }>;
 }
 
-interface Ferramenta {
+export interface Ferramenta {
+  id: number;
   codigo: string;
   nome: string;
   categoria: string;
@@ -174,7 +176,10 @@ export class APIClient {
   async listarFerramentas(): Promise<Ferramenta[]> {
     try {
       const response = await this.api.get<Ferramenta[]>('/ferramentas');
-      return response.data;
+      return response.data.map((item: any) => ({
+        ...item,
+        alocadoPara: item.alocadoPara ?? item.alocado ?? item.alocado_para ?? undefined,
+      }));
     } catch (error) {
       throw new Error(this.extractErrorMessage(error));
     }
@@ -183,11 +188,39 @@ export class APIClient {
   /**
    * Listar ferramentas de um colaborador
    */
-  async listarMinhasFerramentas(): Promise<Ferramenta[]> {
+  async listarMinhasFerramentas(cracha?: string): Promise<Ferramenta[]> {
     try {
-      const response = await this.api.get<Ferramenta[]>(`/ferramentas`);
+      const endpoint = cracha ? `/ferramentas?cracha=${encodeURIComponent(cracha)}` : '/ferramentas';
+      const response = await this.api.get<Ferramenta[]>(endpoint);
+      return response.data.map((item: any) => ({
+        ...item,
+        alocadoPara: item.alocadoPara ?? item.alocado ?? item.alocado_para ?? undefined,
+      }));
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  async listarRelatoriosMovimentacoes(): Promise<any> {
+    try {
+      const response = await this.api.get('/relatorios/movimentacoes');
       return response.data;
     } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  async baixarRelatorio(formato: 'excel' | 'pdf'): Promise<string> {
+    try {
+      const extension = formato === 'excel' ? 'xlsx' : 'pdf';
+      const fileName = `Relatorio_Marilan.${extension}`;
+      const cacheDirectory = ((FileSystem as unknown) as { cacheDirectory?: string }).cacheDirectory ?? '';
+      const fileUri = `${cacheDirectory}${fileName}`;
+      const url = `${this.api.defaults.baseURL}/relatorios/movimentacoes?formato=${formato}`;
+      const headers = this.token ? { Authorization: `Bearer ${this.token}` } : undefined;
+      const result = await FileSystem.downloadAsync(url, fileUri, { headers });
+      return result.uri;
+    } catch (error: any) {
       throw new Error(this.extractErrorMessage(error));
     }
   }

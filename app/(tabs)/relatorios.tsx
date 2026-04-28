@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
-import * as XLSX from 'xlsx';
+import { apiClient, type Ferramenta } from '../../services/api';
 
 // ─── Design System ─────────────────────────────────────────────────────────────
 const D = {
@@ -49,18 +49,6 @@ const D = {
   amberBg:    'rgba(201,120,0,0.08)',
   amberText:  '#7A4800',
 };
-
-// ─── Mock Data ──────────────────────────────────────────────────────────────────
-const MOCK_FERRAMENTAS = [
-  { id: 1, nome: 'Furadeira de Impacto',   codigo: 'FRR-0001', categoria: 'Elétrica',  status: 'Disponível',   alocado: '—'            },
-  { id: 2, nome: 'Esmerilhadeira Angular', codigo: 'FRR-0002', categoria: 'Elétrica',  status: 'Em uso',        alocado: 'Carlos Mendes' },
-  { id: 3, nome: 'Serra Circular',         codigo: 'FRR-0003', categoria: 'Elétrica',  status: 'Em uso',        alocado: 'Ana Souza'     },
-  { id: 4, nome: 'Chave Inglesa 12"',      codigo: 'FRR-0004', categoria: 'Manual',    status: 'Em manutenção', alocado: '—'             },
-  { id: 5, nome: 'Parafusadeira Sem Fio',  codigo: 'FRR-0005', categoria: 'Elétrica',  status: 'Disponível',   alocado: '—'             },
-  { id: 6, nome: 'Nível a Laser',          codigo: 'FRR-0006', categoria: 'Medição',   status: 'Em uso',        alocado: 'João Lima'     },
-  { id: 7, nome: 'Alicate Universal',      codigo: 'FRR-0007', categoria: 'Manual',    status: 'Disponível',   alocado: '—'             },
-  { id: 8, nome: 'Martelo de Borracha',    codigo: 'FRR-0008', categoria: 'Manual',    status: 'Em manutenção', alocado: '—'             },
-];
 
 type ToolStatus = 'Disponível' | 'Em uso' | 'Em manutenção';
 
@@ -161,7 +149,7 @@ const occ = StyleSheet.create({
 });
 
 // ─── Tool Row ───────────────────────────────────────────────────────────────────
-function ToolRow({ item, index }: { item: typeof MOCK_FERRAMENTAS[0]; index: number }) {
+function ToolRow({ item, index }: { item: Ferramenta; index: number }) {
   const oy = useRef(new Animated.Value(12)).current;
   const op = useRef(new Animated.Value(0)).current;
 
@@ -191,10 +179,10 @@ function ToolRow({ item, index }: { item: typeof MOCK_FERRAMENTAS[0]; index: num
             <View style={tr.sep} />
             <Text style={tr.cat}>{item.categoria}</Text>
           </View>
-          {isInUse && item.alocado !== '—' && (
+          {isInUse && item.alocadoPara && item.alocadoPara !== '—' && (
             <View style={tr.allocRow}>
               <UserIcon size={11} color={D.red} />
-              <Text style={tr.allocText}>{item.alocado}</Text>
+              <Text style={tr.allocText}>{item.alocadoPara}</Text>
             </View>
           )}
         </View>
@@ -283,6 +271,9 @@ const tos = StyleSheet.create({
 
 // ─── Main Screen ────────────────────────────────────────────────────────────────
 export default function RelatoriosScreen() {
+  const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
+  const [movimentacoesCount, setMovimentacoesCount] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [toast, setToast]         = useState({ visible: false, msg: '' });
 
@@ -298,13 +289,13 @@ export default function RelatoriosScreen() {
   const btnScale   = useRef(new Animated.Value(1)).current;
 
   const resumo = useMemo(() => {
-    const total       = MOCK_FERRAMENTAS.length;
-    const emUso       = MOCK_FERRAMENTAS.filter(f => f.status === 'Em uso').length;
-    const disponiveis = MOCK_FERRAMENTAS.filter(f => f.status === 'Disponível').length;
-    const manutencao  = MOCK_FERRAMENTAS.filter(f => f.status === 'Em manutenção').length;
-    const ocupacao    = Math.round((emUso / total) * 100);
+    const total       = ferramentas.length;
+    const emUso       = ferramentas.filter(f => f.status === 'Em uso').length;
+    const disponiveis = ferramentas.filter(f => f.status === 'Disponível').length;
+    const manutencao  = ferramentas.filter(f => f.status === 'Em manutenção').length;
+    const ocupacao    = total ? Math.round((emUso / total) * 100) : 0;
     return { total, emUso, disponiveis, manutencao, ocupacao };
-  }, []);
+  }, [ferramentas]);
 
   useEffect(() => {
     Animated.sequence([
@@ -325,6 +316,27 @@ export default function RelatoriosScreen() {
     }, 500);
   }, []);
 
+  useEffect(() => {
+    const carregarDados = async () => {
+      try {
+        setLoading(true);
+        const [ferramentasApi, relatorio] = await Promise.all([
+          apiClient.listarFerramentas(),
+          apiClient.listarRelatoriosMovimentacoes(),
+        ]);
+
+        setFerramentas(ferramentasApi);
+        setMovimentacoesCount(Array.isArray(relatorio) ? relatorio.length : 0);
+      } catch (error: any) {
+        Alert.alert('Erro', error.message || 'Não foi possível carregar os dados do relatório.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    carregarDados();
+  }, []);
+
   const showToast = (msg: string) => {
     setToast({ visible: true, msg });
     setTimeout(() => setToast({ visible: false, msg: '' }), 3200);
@@ -338,25 +350,17 @@ export default function RelatoriosScreen() {
 
     try {
       setExporting(true);
-      const data = MOCK_FERRAMENTAS.map(f => ({
-        ID: f.id, Nome: f.nome, Código: f.codigo,
-        Categoria: f.categoria, Status: f.status, 'Alocado Para': f.alocado,
-      }));
-      const ws = XLSX.utils.json_to_sheet(data);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Inventário');
-      const b64  = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const path = ((FileSystem as any).cacheDirectory || '') + 'Inventario_Ferramentas.xlsx';
-      await (FileSystem as any).writeAsStringAsync(path, b64, { encoding: (FileSystem as any).EncodingType?.Base64 });
+      const path = await apiClient.baixarRelatorio('excel');
       const ok = await Sharing.isAvailableAsync();
+
       if (ok) {
         await Sharing.shareAsync(path);
         showToast('Planilha exportada com sucesso!');
       } else {
         Alert.alert('Aviso', 'Compartilhamento não disponível neste dispositivo.');
       }
-    } catch {
-      Alert.alert('Erro', 'Não foi possível gerar a planilha.');
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message || 'Não foi possível gerar a planilha.');
     } finally {
       setExporting(false);
     }
@@ -381,7 +385,9 @@ export default function RelatoriosScreen() {
           <View style={s.headerTop}>
             <View>
               <Text style={s.headerTitle}>Relatórios</Text>
-              <Text style={s.headerSub}>Painel gerencial · Almoxarife</Text>
+              <Text style={s.headerSub}>
+                Painel gerencial · Almoxarife · {movimentacoesCount} movimentação{movimentacoesCount === 1 ? '' : 'es'}
+              </Text>
             </View>
             {/* Live indicator */}
             <View style={s.livePill}>
@@ -409,6 +415,13 @@ export default function RelatoriosScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[s.bodyContent, { paddingBottom: 100 }]}
         >
+          {loading && (
+            <View style={s.loadingOverlay}>
+              <ActivityIndicator color={D.orange} size="large" />
+              <Text style={s.loadingText}>Carregando informações do relatório...</Text>
+            </View>
+          )}
+
           {/* ── Metric Cards ── */}
           <View style={s.section}>
             <SectionHeader label="Distribuição" count={resumo.total} color={D.orange} />
@@ -464,8 +477,8 @@ export default function RelatoriosScreen() {
 
           {/* ── Inventory List ── */}
           <View style={s.section}>
-            <SectionHeader label="Inventário detalhado" count={MOCK_FERRAMENTAS.length} color={D.green} />
-            {MOCK_FERRAMENTAS.map((item, i) => (
+            <SectionHeader label="Inventário detalhado" count={ferramentas.length} color={D.green} />
+            {ferramentas.map((item, i) => (
               <ToolRow key={item.id} item={item} index={i} />
             ))}
           </View>
@@ -531,6 +544,8 @@ const s = StyleSheet.create({
   body:        { flex: 1, backgroundColor: D.offWhite, borderTopLeftRadius: 26, borderTopRightRadius: 26, overflow: 'hidden' },
   bodyContent: { paddingHorizontal: 20, paddingTop: 20 },
   section:     { marginBottom: 8 },
+  loadingOverlay: { alignItems: 'center', justifyContent: 'center', paddingVertical: 30 },
+  loadingText: { marginTop: 14, fontSize: 13, color: D.gray500, fontWeight: '600' },
 
   metricsRow: { flexDirection: 'row', gap: 9, marginBottom: 8 },
 

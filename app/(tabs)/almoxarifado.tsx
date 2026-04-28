@@ -1,17 +1,19 @@
 /**
- * app/(tabs)/almoxarifado.tsx — Marilan v3 · Liberação em Lote via NFC
- * Design: Industrial Precision · Laranja Institucional + Branco Cirúrgico
- * Lead: Mobile UX / Operacional de Fábrica
+ * app/(tabs)/almoxarifado.tsx — Marilan v4 · API Real + NFC Simulado
+ * Integração: axios + endpoints reais (/retirar, /ferramentas, /colaborador/{cracha}/ferramentas)
+ * NFC: Fluxo simulado com botão discreto + fluxo manual real (crachá)
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   Easing,
   FlatList,
+  KeyboardAvoidingView,
   LayoutAnimation,
   Modal,
   Platform,
@@ -19,6 +21,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   UIManager,
   View,
@@ -27,7 +30,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { apiClient } from '../../services/api';
 
-// Ativa LayoutAnimation no Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -36,15 +38,12 @@ const { width: SW, height: SH } = Dimensions.get('window');
 
 // ─── Design System ─────────────────────────────────────────────────────────────
 const D = {
-  // Paleta Primária
   orange:     '#FF5722',
   orangeHot:  '#FF6D00',
   orangeDark: '#BF360C',
   orangeSoft: 'rgba(255,87,34,0.10)',
   orangeGlow: 'rgba(255,87,34,0.18)',
   orangeLine: 'rgba(255,87,34,0.25)',
-
-  // Neutros Cirúrgicos
   white:      '#FFFFFF',
   snow:       '#FAFAFA',
   mist:       '#F5F5F5',
@@ -55,8 +54,6 @@ const D = {
   iron:       '#616161',
   carbon:     '#424242',
   obsidian:   '#212121',
-
-  // Status
   green:      '#2E7D32',
   greenLight: '#43A047',
   greenBg:    'rgba(46,125,50,0.08)',
@@ -66,12 +63,9 @@ const D = {
   redBg:      'rgba(198,40,40,0.08)',
   amber:      '#E65100',
   amberBg:    'rgba(230,81,0,0.08)',
-
-  // NFC Modal
   nfcBg:      '#0D0D0D',
   nfcSurface: '#1A1A1A',
   nfcBorder:  'rgba(255,87,34,0.3)',
-  nfcGlow:    'rgba(255,87,34,0.15)',
 };
 
 // ─── Tipos ─────────────────────────────────────────────────────────────────────
@@ -89,7 +83,9 @@ interface LoteItem extends Ferramenta {
   qty: number;
 }
 
-type NFCPhase = 'waiting' | 'connected' | 'confirming_requester' | 'confirming_almoxarife' | 'done' | 'error';
+// Modal pode estar em modo NFC (simulado) ou Manual (real)
+type LibMode = 'nfc' | 'manual';
+type NFCPhase = 'waiting' | 'simulated_connected' | 'confirming' | 'submitting' | 'done' | 'error';
 
 // ─── Icons ─────────────────────────────────────────────────────────────────────
 const WrenchIcon = ({ size = 18, color = D.orange }: { size?: number; color?: string }) => (
@@ -154,6 +150,13 @@ const NFCChipIcon = ({ size = 44, color = D.orange }: { size?: number; color?: s
   </Svg>
 );
 
+const KeyboardIcon = ({ size = 20, color = D.orange }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x={2} y={6} width={20} height={12} rx={2} stroke={color} strokeWidth={1.6} />
+    <Path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+  </Svg>
+);
+
 // ─── Radar Pulse (NFC Modal) ───────────────────────────────────────────────────
 function RadarPulse({ active, phase }: { active: boolean; phase: NFCPhase }) {
   const rings = [
@@ -188,7 +191,7 @@ function RadarPulse({ active, phase }: { active: boolean; phase: NFCPhase }) {
   }, [active, phase]);
 
   useEffect(() => {
-    if (phase === 'connected' || phase === 'confirming_requester' || phase === 'confirming_almoxarife') {
+    if (phase !== 'waiting' && phase !== 'error') {
       Animated.parallel([
         Animated.spring(connectedScale, { toValue: 1, tension: 100, friction: 8, useNativeDriver: true }),
         Animated.timing(connectedOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
@@ -199,12 +202,11 @@ function RadarPulse({ active, phase }: { active: boolean; phase: NFCPhase }) {
     }
   }, [phase]);
 
-  const isConnected = phase !== 'waiting';
-  const iconColor = phase === 'done' ? D.green : D.orange;
+  const isConnected = phase !== 'waiting' && phase !== 'error';
+  const iconColor = phase === 'done' ? D.green : phase === 'error' ? D.red : D.orange;
 
   return (
     <View style={rp.container}>
-      {/* Radar rings */}
       {phase === 'waiting' && rings.map((r, i) => (
         <Animated.View
           key={i}
@@ -218,8 +220,6 @@ function RadarPulse({ active, phase }: { active: boolean; phase: NFCPhase }) {
           ]}
         />
       ))}
-
-      {/* Static connected rings */}
       {isConnected && (
         <Animated.View style={[rp.connectedRingsWrap, { opacity: connectedOpacity, transform: [{ scale: connectedScale }] }]}>
           <View style={[rp.ring, { transform: [{ scale: 1.8 }], opacity: 0.12, borderColor: iconColor }]} />
@@ -227,8 +227,6 @@ function RadarPulse({ active, phase }: { active: boolean; phase: NFCPhase }) {
           <View style={[rp.ring, { transform: [{ scale: 1.0 }], opacity: 0.3, borderColor: iconColor }]} />
         </Animated.View>
       )}
-
-      {/* Core circle */}
       <View style={[rp.core, isConnected && { borderColor: `${iconColor}60`, backgroundColor: `${iconColor}12` }]}>
         {phase === 'done' ? (
           <CheckIcon size={40} color={D.green} />
@@ -260,397 +258,6 @@ const rp = StyleSheet.create({
   },
 });
 
-// ─── NFC Full-Screen Modal ─────────────────────────────────────────────────────
-interface NFCModalProps {
-  visible: boolean;
-  lote: LoteItem[];
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-function NFCModal({ visible, lote, onClose, onSuccess }: NFCModalProps) {
-  const [phase, setPhase] = useState<NFCPhase>('waiting');
-  const [simulatedIds, setSimulatedIds] = useState<string[]>([]);
-  const [requesterAccepted, setRequesterAccepted] = useState(false);
-  const [almoxarifeAccepted, setAlmoxarifeAccepted] = useState(false);
-  const [countdown, setCountdown] = useState(3);
-
-  const bgOpacity = useRef(new Animated.Value(0)).current;
-  const contentSlide = useRef(new Animated.Value(60)).current;
-  const contentOpacity = useRef(new Animated.Value(0)).current;
-  const successScale = useRef(new Animated.Value(0)).current;
-  const countdownAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (visible) {
-      setPhase('waiting');
-      setSimulatedIds([]);
-      setRequesterAccepted(false);
-      setAlmoxarifeAccepted(false);
-      setCountdown(3);
-      Animated.parallel([
-        Animated.timing(bgOpacity, { toValue: 1, duration: 320, useNativeDriver: true }),
-        Animated.spring(contentSlide, { toValue: 0, tension: 70, friction: 12, useNativeDriver: true }),
-        Animated.timing(contentOpacity, { toValue: 1, duration: 380, useNativeDriver: true }),
-      ]).start();
-    } else {
-      bgOpacity.setValue(0);
-      contentSlide.setValue(60);
-      contentOpacity.setValue(0);
-    }
-  }, [visible]);
-
-  // Auto-simulate connection after 2s for demo
-  useEffect(() => {
-    if (visible && phase === 'waiting') {
-      const timer = setTimeout(() => simulateConnection(), 2200);
-      return () => clearTimeout(timer);
-    }
-  }, [visible, phase]);
-
-  const simulateConnection = () => {
-    const fakeIds = lote.map(item => item.codigo);
-    setSimulatedIds(fakeIds);
-    setPhase('connected');
-    setTimeout(() => setPhase('confirming_requester'), 1000);
-  };
-
-  const handleRequesterAccept = () => {
-    setRequesterAccepted(true);
-    setPhase('confirming_almoxarife');
-  };
-
-  const handleAlmoxarifeAccept = () => {
-    setAlmoxarifeAccepted(true);
-    setPhase('done');
-    Animated.spring(successScale, { toValue: 1, tension: 80, friction: 8, useNativeDriver: true }).start();
-
-    // Countdown and auto-close
-    let c = 3;
-    const interval = setInterval(() => {
-      c--;
-      setCountdown(c);
-      Animated.sequence([
-        Animated.timing(countdownAnim, { toValue: 1.2, duration: 150, useNativeDriver: true }),
-        Animated.spring(countdownAnim, { toValue: 1, tension: 200, friction: 10, useNativeDriver: true }),
-      ]).start();
-      if (c <= 0) {
-        clearInterval(interval);
-        handleDone();
-      }
-    }, 1000);
-  };
-
-  const handleDone = () => {
-    Animated.parallel([
-      Animated.timing(bgOpacity, { toValue: 0, duration: 280, useNativeDriver: true }),
-      Animated.timing(contentOpacity, { toValue: 0, duration: 240, useNativeDriver: true }),
-    ]).start(() => {
-      onSuccess();
-    });
-  };
-
-  const handleClose = () => {
-    Animated.parallel([
-      Animated.timing(bgOpacity, { toValue: 0, duration: 260, useNativeDriver: true }),
-      Animated.timing(contentSlide, { toValue: 60, duration: 240, useNativeDriver: true }),
-      Animated.timing(contentOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
-    ]).start(() => onClose());
-  };
-
-  const getPhaseText = () => {
-    switch (phase) {
-      case 'waiting': return { title: 'Aguardando Conexão', sub: 'com o Dispositivo do Almoxarife…', color: D.orange };
-      case 'connected': return { title: 'Conexão Estabelecida!', sub: 'Sincronizando dados do lote…', color: D.orange };
-      case 'confirming_requester': return { title: 'Confirme a Solicitação', sub: 'Verifique os itens e aceite para prosseguir', color: D.orange };
-      case 'confirming_almoxarife': return { title: 'Aguardando Almoxarife', sub: 'O almoxarife deve aceitar no dispositivo dele', color: D.amber };
-      case 'done': return { title: 'Liberação Concluída!', sub: `Encerrando em ${countdown}s…`, color: D.green };
-      case 'error': return { title: 'Falha na Conexão', sub: 'Tente aproximar os dispositivos novamente', color: D.red };
-    }
-  };
-
-  const txt = getPhaseText();
-
-  return (
-    <Modal transparent visible={visible} animationType="none" statusBarTranslucent onRequestClose={handleClose}>
-      <Animated.View style={[nfc.overlay, { opacity: bgOpacity }]} />
-
-      <Animated.View
-        style={[nfc.container, { opacity: contentOpacity, transform: [{ translateY: contentSlide }] }]}
-      >
-        <StatusBar barStyle="light-content" backgroundColor={D.nfcBg} />
-
-        {/* Header */}
-        <SafeAreaView edges={['top']} style={{ backgroundColor: D.nfcBg }}>
-          <View style={nfc.header}>
-            <View style={nfc.headerLeft}>
-              <View style={nfc.loteTag}>
-                <Text style={nfc.loteTagText}>{lote.length} {lote.length === 1 ? 'ITEM' : 'ITENS'} NO LOTE</Text>
-              </View>
-            </View>
-            {phase !== 'done' && (
-              <TouchableOpacity onPress={handleClose} style={nfc.cancelBtn} activeOpacity={0.7}>
-                <Text style={nfc.cancelText}>Cancelar</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </SafeAreaView>
-
-        {/* Main radar area */}
-        <View style={nfc.radarArea}>
-          <RadarPulse active={visible} phase={phase} />
-
-          <View style={nfc.phaseTextWrap}>
-            <Text style={[nfc.phaseTitle, { color: txt.color }]}>{txt.title}</Text>
-            <Text style={nfc.phaseSub}>{txt.sub}</Text>
-          </View>
-
-          {/* Pulsing status dot */}
-          {phase === 'waiting' && (
-            <View style={nfc.statusRow}>
-              <View style={[nfc.statusDot, { backgroundColor: D.orange }]} />
-              <Text style={nfc.statusLabel}>Transmitindo sinal NFC…</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Content area */}
-        <View style={nfc.contentArea}>
-
-          {/* Connected — show items */}
-          {(phase === 'connected' || phase === 'confirming_requester') && (
-            <View style={nfc.itemsCard}>
-              <Text style={nfc.itemsCardTitle}>ITENS DO LOTE DETECTADOS</Text>
-              {simulatedIds.map((id, i) => (
-                <View key={id} style={nfc.itemRow}>
-                  <View style={nfc.itemDot} />
-                  <Text style={nfc.itemCode}>{id}</Text>
-                  <Text style={nfc.itemName} numberOfLines={1}>{lote[i]?.nome}</Text>
-                  <View style={nfc.itemQtyBadge}>
-                    <Text style={nfc.itemQty}>×{lote[i]?.qty}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Confirming requester */}
-          {phase === 'confirming_requester' && (
-            <View style={nfc.confirmSection}>
-              <Text style={nfc.confirmHint}>Dispositivo do Solicitante (Você)</Text>
-              <TouchableOpacity style={nfc.acceptBtn} onPress={handleRequesterAccept} activeOpacity={0.87}>
-                <CheckIcon size={20} color={D.white} />
-                <Text style={nfc.acceptBtnText}>Aceitar e Aguardar Almoxarife</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Waiting almoxarife */}
-          {phase === 'confirming_almoxarife' && (
-            <View style={nfc.waitAlmox}>
-              <ActivityIndicator color={D.orange} size="small" />
-              <Text style={nfc.waitAlmoxText}>Aguardando confirmação do almoxarife…</Text>
-
-              {/* Demo button to simulate almoxarife acceptance */}
-              <TouchableOpacity style={nfc.simBtn} onPress={handleAlmoxarifeAccept} activeOpacity={0.7}>
-                <Text style={nfc.simBtnText}>[DEMO] Simular Aceite do Almoxarife</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Done */}
-          {phase === 'done' && (
-            <Animated.View style={[nfc.doneCard, { transform: [{ scale: successScale }] }]}>
-              <View style={nfc.doneIconCircle}>
-                <CheckIcon size={32} color={D.green} />
-              </View>
-              <Text style={nfc.doneTitle}>Transferência Registrada</Text>
-              <Text style={nfc.doneSub}>{lote.length} {lote.length === 1 ? 'ferramenta transferida' : 'ferramentas transferidas'} com sucesso</Text>
-              <View style={nfc.doneItems}>
-                {lote.map(item => (
-                  <View key={item.codigo} style={nfc.doneItem}>
-                    <CheckIcon size={12} color={D.green} />
-                    <Text style={nfc.doneItemText}>{item.nome}</Text>
-                  </View>
-                ))}
-              </View>
-              <Animated.Text style={[nfc.countdown, { transform: [{ scale: countdownAnim }] }]}>
-                Fechando em {countdown}s
-              </Animated.Text>
-            </Animated.View>
-          )}
-        </View>
-
-        {/* Bottom safe area */}
-        <SafeAreaView edges={['bottom']} style={{ backgroundColor: D.nfcBg }} />
-      </Animated.View>
-    </Modal>
-  );
-}
-
-const nfc = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.95)',
-  },
-  container: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: D.nfcBg,
-    flexDirection: 'column',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 22,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  loteTag: {
-    backgroundColor: D.orangeSoft,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: D.orangeLine,
-  },
-  loteTagText: { fontSize: 11, fontWeight: '800', color: D.orange, letterSpacing: 1.5 },
-  cancelBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  cancelText: { fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: '500' },
-
-  radarArea: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 24,
-    paddingHorizontal: 32,
-  },
-  phaseTextWrap: { alignItems: 'center', gap: 8 },
-  phaseTitle: { fontSize: 24, fontWeight: '900', letterSpacing: -0.4, textAlign: 'center' },
-  phaseSub: { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 22 },
-
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusLabel: { fontSize: 12, color: 'rgba(255,255,255,0.35)', fontWeight: '500', letterSpacing: 0.5 },
-
-  contentArea: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    gap: 14,
-    maxHeight: SH * 0.42,
-  },
-
-  // Items card
-  itemsCard: {
-    backgroundColor: D.nfcSurface,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: D.nfcBorder,
-    gap: 10,
-  },
-  itemsCardTitle: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: D.orange,
-    letterSpacing: 1.8,
-    marginBottom: 2,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  itemDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: D.orange },
-  itemCode: {
-    fontSize: 10,
-    color: D.orange,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontWeight: '600',
-    minWidth: 72,
-  },
-  itemName: { flex: 1, fontSize: 13, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
-  itemQtyBadge: {
-    backgroundColor: D.orangeSoft,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  itemQty: { fontSize: 11, fontWeight: '800', color: D.orange },
-
-  // Confirm
-  confirmSection: { gap: 10 },
-  confirmHint: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.35)',
-    fontWeight: '600',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    paddingHorizontal: 4,
-  },
-  acceptBtn: {
-    height: 56,
-    borderRadius: 14,
-    backgroundColor: D.green,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  acceptBtnText: { fontSize: 15, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
-
-  // Waiting
-  waitAlmox: { alignItems: 'center', gap: 14, paddingVertical: 8 },
-  waitAlmoxText: { fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center' },
-  simBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderStyle: 'dashed',
-  },
-  simBtnText: { fontSize: 12, color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' },
-
-  // Done
-  doneCard: {
-    backgroundColor: D.nfcSurface,
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: `${D.green}40`,
-  },
-  doneIconCircle: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: `${D.green}15`,
-    borderWidth: 2,
-    borderColor: `${D.green}40`,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  doneTitle: { fontSize: 20, fontWeight: '900', color: D.white, letterSpacing: -0.3 },
-  doneSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center' },
-  doneItems: { gap: 6, width: '100%' },
-  doneItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  doneItemText: { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '500' },
-  countdown: { fontSize: 12, color: D.green, fontWeight: '700', marginTop: 4 },
-});
-
 // ─── Toast ─────────────────────────────────────────────────────────────────────
 function Toast({ message, visible, type = 'success' }: { message: string; visible: boolean; type?: 'success' | 'error' }) {
   const y = useRef(new Animated.Value(24)).current;
@@ -672,13 +279,10 @@ function Toast({ message, visible, type = 'success' }: { message: string; visibl
     }
   }, [visible]);
 
-  const iconColor = type === 'success' ? D.green : D.red;
-  const bgColor = type === 'success' ? D.green : D.red;
-
   return (
     <Animated.View style={[toast.wrap, { opacity: op, transform: [{ translateY: y }, { scale: sc }] }]} pointerEvents="none">
       <View style={toast.pill}>
-        <View style={[toast.icon, { backgroundColor: bgColor }]}>
+        <View style={[toast.icon, { backgroundColor: type === 'success' ? D.green : D.red }]}>
           {type === 'success'
             ? <CheckIcon size={12} color={D.white} />
             : <XIcon size={12} color={D.white} />
@@ -689,6 +293,7 @@ function Toast({ message, visible, type = 'success' }: { message: string; visibl
     </Animated.View>
   );
 }
+
 const toast = StyleSheet.create({
   wrap: { position: 'absolute', bottom: 28, left: 20, right: 20, zIndex: 9999 },
   pill: {
@@ -717,13 +322,14 @@ function StatusBadge({ status }: { status: FerStatus }) {
     </View>
   );
 }
+
 const stb = StyleSheet.create({
   pill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99 },
   dot: { width: 5, height: 5, borderRadius: 2.5 },
   label: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
 });
 
-// ─── Seção: Minhas Ferramentas (Em Custódia) ──────────────────────────────────
+// ─── Seção: Minhas Ferramentas ─────────────────────────────────────────────────
 function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver: () => void }) {
   const [expanded, setExpanded] = useState(true);
 
@@ -736,7 +342,6 @@ function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver
 
   return (
     <View style={my.wrap}>
-      {/* Header */}
       <TouchableOpacity style={my.header} onPress={toggleExpanded} activeOpacity={0.8}>
         <View style={my.headerLeft}>
           <View style={my.headerIconBox}>
@@ -759,8 +364,6 @@ function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver
           </Svg>
         </View>
       </TouchableOpacity>
-
-      {/* Items */}
       {expanded && (
         <View style={my.listWrap}>
           {items.map((item, idx) => (
@@ -771,14 +374,17 @@ function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={my.itemName} numberOfLines={1}>{item.nome}</Text>
-                  <Text style={my.itemCat}>{item.categoria}</Text>
+                  {/* Reflete exatamente o alocadoPara da API */}
+                  {item.alocadoPara ? (
+                    <Text style={my.itemAlloc}>👤 {item.alocadoPara}</Text>
+                  ) : (
+                    <Text style={my.itemCat}>{item.categoria}</Text>
+                  )}
                 </View>
               </View>
               <StatusBadge status={item.status} />
             </View>
           ))}
-
-          {/* Devolver */}
           <TouchableOpacity style={my.devolverBtn} onPress={onDevolver} activeOpacity={0.85}>
             <BackIcon size={15} color={D.orange} />
             <Text style={my.devolverText}>Iniciar Devolução</Text>
@@ -831,6 +437,7 @@ const my = StyleSheet.create({
   itemCodeText: { fontSize: 9, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: D.iron, fontWeight: '600', letterSpacing: 0.5 },
   itemName: { fontSize: 13, fontWeight: '700', color: D.obsidian },
   itemCat: { fontSize: 10, color: D.slate, marginTop: 1 },
+  itemAlloc: { fontSize: 10, color: D.orange, marginTop: 1, fontWeight: '600' },
   devolverBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     marginTop: 12,
@@ -1016,6 +623,7 @@ function SectionHdr({ label, count, color = D.slate }: { label: string; count: n
     </View>
   );
 }
+
 const shdr = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, marginTop: 6 },
   bar: { width: 3.5, height: 14, borderRadius: 2 },
@@ -1024,7 +632,7 @@ const shdr = StyleSheet.create({
   num: { fontSize: 11, fontWeight: '800' },
 });
 
-// ─── Floating Action Bar (Lote Rodapé) ────────────────────────────────────────
+// ─── Floating Action Bar ───────────────────────────────────────────────────────
 function LoteFooter({ count, onSolicitar, anim }: { count: number; onSolicitar: () => void; anim: Animated.Value }) {
   const sc = anim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
   const ty = anim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
@@ -1052,8 +660,7 @@ const lf = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: D.orange, borderRadius: 18,
     paddingVertical: 15, paddingHorizontal: 18,
-    shadowColor: D.orangeDark,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4, shadowRadius: 20, elevation: 12,
   },
   leftSection: { flexDirection: 'row', alignItems: 'center', gap: 13 },
@@ -1066,13 +673,514 @@ const lf = StyleSheet.create({
   },
 });
 
+// ─── Modal de Liberação (NFC Simulado + Manual Real) ──────────────────────────
+interface LibModalProps {
+  visible: boolean;
+  lote: LoteItem[];
+  onClose: () => void;
+  onSuccess: (crachaColaborador: string) => Promise<void>;
+}
+
+function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
+  const [mode, setMode] = useState<LibMode>('nfc');
+  const [nfcPhase, setNfcPhase] = useState<NFCPhase>('waiting');
+  // Fluxo manual
+  const [crachaColaborador, setCrachaColaborador] = useState('');
+  const [crachaAlmoxarife, setCrachaAlmoxarife] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [manualError, setManualError] = useState('');
+  const [countdown, setCountdown] = useState(3);
+
+  const bgOpacity = useRef(new Animated.Value(0)).current;
+  const contentSlide = useRef(new Animated.Value(60)).current;
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+  const successScale = useRef(new Animated.Value(0)).current;
+  const countdownAnim = useRef(new Animated.Value(1)).current;
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      setMode('nfc');
+      setNfcPhase('waiting');
+      setCrachaColaborador('');
+      setCrachaAlmoxarife('');
+      setSubmitting(false);
+      setManualError('');
+      setCountdown(3);
+      Animated.parallel([
+        Animated.timing(bgOpacity, { toValue: 1, duration: 320, useNativeDriver: true }),
+        Animated.spring(contentSlide, { toValue: 0, tension: 70, friction: 12, useNativeDriver: true }),
+        Animated.timing(contentOpacity, { toValue: 1, duration: 380, useNativeDriver: true }),
+      ]).start();
+    } else {
+      bgOpacity.setValue(0);
+      contentSlide.setValue(60);
+      contentOpacity.setValue(0);
+      successScale.setValue(0);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    }
+  }, [visible]);
+
+  const handleClose = () => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    Animated.parallel([
+      Animated.timing(bgOpacity, { toValue: 0, duration: 260, useNativeDriver: true }),
+      Animated.timing(contentSlide, { toValue: 60, duration: 240, useNativeDriver: true }),
+      Animated.timing(contentOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+    ]).start(() => onClose());
+  };
+
+  // ── NFC Simulado: botão discreto que simula a leitura de um ID de almoxarife
+  const handleSimulateNFC = () => {
+    setNfcPhase('simulated_connected');
+    setTimeout(() => setNfcPhase('confirming'), 900);
+  };
+
+  const handleNFCConfirm = async () => {
+    setNfcPhase('submitting');
+    try {
+      // Usa crachá simulado do almoxarife (em produção viria do NFC)
+      const crachaAtual = await AsyncStorage.getItem('userCracha') ?? '0000';
+      await onSuccess(crachaAtual);
+      setNfcPhase('done');
+      Animated.spring(successScale, { toValue: 1, tension: 80, friction: 8, useNativeDriver: true }).start();
+      startCountdown();
+    } catch {
+      setNfcPhase('error');
+    }
+  };
+
+  const startCountdown = () => {
+    let c = 3;
+    countdownRef.current = setInterval(() => {
+      c--;
+      setCountdown(c);
+      Animated.sequence([
+        Animated.timing(countdownAnim, { toValue: 1.2, duration: 150, useNativeDriver: true }),
+        Animated.spring(countdownAnim, { toValue: 1, tension: 200, friction: 10, useNativeDriver: true }),
+      ]).start();
+      if (c <= 0) {
+        if (countdownRef.current) clearInterval(countdownRef.current);
+        handleClose();
+      }
+    }, 1000);
+  };
+
+  // ── Fluxo Manual: chamada real à API
+  const handleManualSubmit = async () => {
+    if (!crachaColaborador.trim()) {
+      setManualError('Informe o crachá do colaborador');
+      return;
+    }
+    try {
+      setSubmitting(true);
+      setManualError('');
+      await onSuccess(crachaColaborador.trim());
+      setNfcPhase('done');
+      Animated.spring(successScale, { toValue: 1, tension: 80, friction: 8, useNativeDriver: true }).start();
+      startCountdown();
+    } catch (e: any) {
+      setManualError(e.message || 'Erro ao efetuar retirada');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const getNFCText = () => {
+    switch (nfcPhase) {
+      case 'waiting': return { title: 'Aguardando Conexão NFC', sub: 'Aproxime o celular do dispositivo do Almoxarife', color: D.orange };
+      case 'simulated_connected': return { title: 'Dispositivo Detectado!', sub: 'Sincronizando dados do lote…', color: D.orange };
+      case 'confirming': return { title: 'Confirme a Retirada', sub: 'Verifique os itens e confirme para continuar', color: D.orange };
+      case 'submitting': return { title: 'Registrando na API…', sub: 'Aguarde enquanto confirmamos a retirada', color: D.amber };
+      case 'done': return { title: 'Retirada Registrada!', sub: `Encerrando em ${countdown}s…`, color: D.green };
+      case 'error': return { title: 'Erro na Retirada', sub: 'Verifique a conexão e tente novamente', color: D.red };
+    }
+  };
+
+  const txt = getNFCText();
+  const totalQty = lote.reduce((a, c) => a + c.qty, 0);
+
+  return (
+    <Modal transparent visible={visible} animationType="none" statusBarTranslucent onRequestClose={handleClose}>
+      <Animated.View style={[nm.overlay, { opacity: bgOpacity }]} />
+
+      <Animated.View style={[nm.container, { opacity: contentOpacity, transform: [{ translateY: contentSlide }] }]}>
+        <StatusBar barStyle="light-content" />
+
+        <SafeAreaView edges={['top']} style={{ backgroundColor: D.nfcBg }}>
+          <View style={nm.header}>
+            <View style={nm.headerLeft}>
+              <View style={nm.loteTag}>
+                <Text style={nm.loteTagText}>{totalQty} {totalQty === 1 ? 'ITEM' : 'ITENS'} NO LOTE</Text>
+              </View>
+              {/* Botão troca de modo */}
+              <TouchableOpacity
+                style={nm.modeToggle}
+                onPress={() => { setMode(m => m === 'nfc' ? 'manual' : 'nfc'); setNfcPhase('waiting'); setManualError(''); }}
+                activeOpacity={0.7}
+              >
+                {mode === 'nfc' ? <KeyboardIcon size={14} color="rgba(255,255,255,0.5)" /> : <NFCChipIcon size={14} color="rgba(255,255,255,0.5)" />}
+                <Text style={nm.modeToggleText}>{mode === 'nfc' ? 'Manual' : 'NFC'}</Text>
+              </TouchableOpacity>
+            </View>
+            {nfcPhase !== 'done' && (
+              <TouchableOpacity onPress={handleClose} style={nm.cancelBtn} activeOpacity={0.7}>
+                <Text style={nm.cancelText}>Cancelar</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </SafeAreaView>
+
+        {/* ── Modo NFC ── */}
+        {mode === 'nfc' && (
+          <>
+            <View style={nm.radarArea}>
+              <RadarPulse active={visible} phase={nfcPhase} />
+              <View style={nm.phaseTextWrap}>
+                <Text style={[nm.phaseTitle, { color: txt.color }]}>{txt.title}</Text>
+                <Text style={nm.phaseSub}>{txt.sub}</Text>
+              </View>
+              {nfcPhase === 'waiting' && (
+                <View style={nm.statusRow}>
+                  <View style={[nm.statusDot, { backgroundColor: D.orange }]} />
+                  <Text style={nm.statusLabel}>Transmitindo sinal NFC…</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={nm.contentArea}>
+              {/* Lista do lote */}
+              {(nfcPhase === 'simulated_connected' || nfcPhase === 'confirming') && (
+                <View style={nm.itemsCard}>
+                  <Text style={nm.itemsCardTitle}>ITENS DETECTADOS NO LOTE</Text>
+                  {lote.map(item => (
+                    <View key={item.codigo} style={nm.itemRow}>
+                      <View style={nm.itemDot} />
+                      <Text style={nm.itemCode}>{item.codigo}</Text>
+                      <Text style={nm.itemName} numberOfLines={1}>{item.nome}</Text>
+                      <View style={nm.itemQtyBadge}>
+                        <Text style={nm.itemQty}>×{item.qty}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Aguardando simulação */}
+              {nfcPhase === 'waiting' && (
+                <View style={nm.waitingSection}>
+                  {/* Botão discreto para simular NFC — será substituído pelo NFC real */}
+                  <TouchableOpacity style={nm.simBtn} onPress={handleSimulateNFC} activeOpacity={0.6}>
+                    <Text style={nm.simBtnText}>Simular Aproximação NFC</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Confirmar retirada */}
+              {nfcPhase === 'confirming' && (
+                <View style={nm.confirmSection}>
+                  <TouchableOpacity style={nm.acceptBtn} onPress={handleNFCConfirm} activeOpacity={0.87}>
+                    <CheckIcon size={20} color={D.white} />
+                    <Text style={nm.acceptBtnText}>Confirmar e Registrar na API</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Submetendo */}
+              {nfcPhase === 'submitting' && (
+                <View style={nm.submittingWrap}>
+                  <ActivityIndicator color={D.orange} size="small" />
+                  <Text style={nm.submittingText}>Registrando retirada no sistema…</Text>
+                </View>
+              )}
+
+              {/* Erro */}
+              {nfcPhase === 'error' && (
+                <View style={nm.errorCard}>
+                  <Text style={nm.errorText}>Não foi possível registrar a retirada. Tente o fluxo Manual.</Text>
+                  <TouchableOpacity onPress={() => { setMode('manual'); setNfcPhase('waiting'); }} style={nm.errorSwitchBtn}>
+                    <Text style={nm.errorSwitchText}>Ir para Manual</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Sucesso */}
+              {nfcPhase === 'done' && (
+                <Animated.View style={[nm.doneCard, { transform: [{ scale: successScale }] }]}>
+                  <View style={nm.doneIconCircle}>
+                    <CheckIcon size={32} color={D.green} />
+                  </View>
+                  <Text style={nm.doneTitle}>Transferência Registrada</Text>
+                  <Text style={nm.doneSub}>{totalQty} {totalQty === 1 ? 'item retirado' : 'itens retirados'} com sucesso</Text>
+                  <Animated.Text style={[nm.countdown, { transform: [{ scale: countdownAnim }] }]}>
+                    Fechando em {countdown}s
+                  </Animated.Text>
+                </Animated.View>
+              )}
+            </View>
+          </>
+        )}
+
+        {/* ── Modo Manual (API Real) ── */}
+        {mode === 'manual' && nfcPhase !== 'done' && (
+          <KeyboardAvoidingView
+            style={nm.manualContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={nm.manualHeader}>
+              <KeyboardIcon size={32} color={D.orange} />
+              <Text style={nm.manualTitle}>Liberação Manual</Text>
+              <Text style={nm.manualSub}>Insira os crachás para registrar a retirada diretamente na API</Text>
+            </View>
+
+            {/* Resumo do lote */}
+            <View style={nm.manualLoteResume}>
+              <Text style={nm.manualLoteLabel}>FERRAMENTAS NO LOTE</Text>
+              {lote.map(item => (
+                <View key={item.codigo} style={nm.manualLoteRow}>
+                  <View style={nm.itemDot} />
+                  <Text style={nm.manualLoteCode}>{item.codigo}</Text>
+                  <Text style={nm.manualLoteName} numberOfLines={1}>{item.nome}</Text>
+                  <Text style={nm.manualLoteQty}>×{item.qty}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Input crachá colaborador */}
+            <View style={nm.manualInputWrap}>
+              <Text style={nm.manualInputLabel}>CRACHÁ DO COLABORADOR</Text>
+              <View style={nm.manualInput}>
+                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                  <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
+                  <Circle cx={9} cy={12} r={2.5} stroke={D.orange} strokeWidth={1.6} />
+                  <Path d="M14 10h4M14 14h3" stroke={D.orange} strokeWidth={1.5} strokeLinecap="round" />
+                </Svg>
+                <TextInput
+                  style={nm.manualInputText}
+                  placeholder="Ex: 1236"
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  value={crachaColaborador}
+                  onChangeText={v => { setCrachaColaborador(v); setManualError(''); }}
+                  keyboardType="numeric"
+                  autoCorrect={false}
+                  editable={!submitting}
+                />
+              </View>
+            </View>
+
+            {!!manualError && (
+              <View style={nm.manualError}>
+                <Text style={nm.manualErrorText}>{manualError}</Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[nm.manualSubmitBtn, submitting && nm.manualSubmitBtnDisabled]}
+              onPress={handleManualSubmit}
+              disabled={submitting}
+              activeOpacity={0.88}
+            >
+              {submitting
+                ? <ActivityIndicator color={D.white} size="small" />
+                : (
+                  <>
+                    <CheckIcon size={18} color={D.white} />
+                    <Text style={nm.manualSubmitText}>Confirmar Retirada via API</Text>
+                  </>
+                )
+              }
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        )}
+
+        {/* Sucesso no modo manual */}
+        {mode === 'manual' && nfcPhase === 'done' && (
+          <View style={nm.manualContainer}>
+            <Animated.View style={[nm.doneCard, { transform: [{ scale: successScale }] }]}>
+              <View style={nm.doneIconCircle}>
+                <CheckIcon size={32} color={D.green} />
+              </View>
+              <Text style={nm.doneTitle}>Retirada Registrada!</Text>
+              <Text style={nm.doneSub}>{totalQty} {totalQty === 1 ? 'item retirado' : 'itens retirados'} com sucesso</Text>
+              <Animated.Text style={[nm.countdown, { transform: [{ scale: countdownAnim }] }]}>
+                Fechando em {countdown}s
+              </Animated.Text>
+            </Animated.View>
+          </View>
+        )}
+
+        <SafeAreaView edges={['bottom']} style={{ backgroundColor: D.nfcBg }} />
+      </Animated.View>
+    </Modal>
+  );
+}
+
+const nm = StyleSheet.create({
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.95)' },
+  container: { ...StyleSheet.absoluteFillObject, backgroundColor: D.nfcBg, flexDirection: 'column' },
+
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 22, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  loteTag: {
+    backgroundColor: D.orangeSoft, borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 5,
+    borderWidth: 1, borderColor: D.orangeLine,
+  },
+  loteTagText: { fontSize: 11, fontWeight: '800', color: D.orange, letterSpacing: 1.5 },
+  modeToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingVertical: 6, paddingHorizontal: 10,
+    borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+  },
+  modeToggleText: { fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: '600' },
+  cancelBtn: {
+    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  cancelText: { fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: '500' },
+
+  // NFC radar area
+  radarArea: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    gap: 24, paddingHorizontal: 32,
+  },
+  phaseTextWrap: { alignItems: 'center', gap: 8 },
+  phaseTitle: { fontSize: 22, fontWeight: '900', letterSpacing: -0.4, textAlign: 'center' },
+  phaseSub: { fontSize: 14, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 22 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusLabel: { fontSize: 12, color: 'rgba(255,255,255,0.35)', fontWeight: '500', letterSpacing: 0.5 },
+
+  contentArea: {
+    paddingHorizontal: 20, paddingBottom: 16, gap: 14,
+    maxHeight: SH * 0.42,
+  },
+
+  // Items card
+  itemsCard: {
+    backgroundColor: D.nfcSurface, borderRadius: 16,
+    padding: 16, borderWidth: 1, borderColor: D.nfcBorder, gap: 10,
+  },
+  itemsCardTitle: { fontSize: 10, fontWeight: '800', color: D.orange, letterSpacing: 1.8, marginBottom: 2 },
+  itemRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  itemDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: D.orange },
+  itemCode: {
+    fontSize: 10, color: D.orange,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontWeight: '600', minWidth: 72,
+  },
+  itemName: { flex: 1, fontSize: 13, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
+  itemQtyBadge: { backgroundColor: D.orangeSoft, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  itemQty: { fontSize: 11, fontWeight: '800', color: D.orange },
+
+  // Waiting (NFC)
+  waitingSection: { alignItems: 'center', paddingTop: 8 },
+  // Botão DISCRETO de simulação NFC - em produção será removido
+  simBtn: {
+    paddingVertical: 10, paddingHorizontal: 20, borderRadius: 10,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderStyle: 'dashed',
+  },
+  simBtnText: { fontSize: 12, color: 'rgba(255,255,255,0.25)', fontStyle: 'italic' },
+
+  // Confirmar
+  confirmSection: { gap: 10 },
+  acceptBtn: {
+    height: 56, borderRadius: 14, backgroundColor: D.green,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+  },
+  acceptBtnText: { fontSize: 15, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
+
+  // Submetendo
+  submittingWrap: { alignItems: 'center', gap: 12, paddingVertical: 10 },
+  submittingText: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center' },
+
+  // Erro
+  errorCard: {
+    backgroundColor: `${D.red}18`, borderRadius: 14,
+    padding: 16, gap: 12, borderWidth: 1, borderColor: `${D.red}30`,
+    alignItems: 'center',
+  },
+  errorText: { fontSize: 13, color: D.redLight, textAlign: 'center', lineHeight: 20 },
+  errorSwitchBtn: {
+    paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8,
+    borderWidth: 1, borderColor: D.redLight,
+  },
+  errorSwitchText: { fontSize: 12, color: D.redLight, fontWeight: '700' },
+
+  // Sucesso
+  doneCard: {
+    backgroundColor: D.nfcSurface, borderRadius: 20,
+    padding: 24, alignItems: 'center', gap: 12,
+    borderWidth: 1, borderColor: `${D.green}40`, margin: 20,
+  },
+  doneIconCircle: {
+    width: 70, height: 70, borderRadius: 35,
+    backgroundColor: `${D.green}15`, borderWidth: 2, borderColor: `${D.green}40`,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  doneTitle: { fontSize: 20, fontWeight: '900', color: D.white, letterSpacing: -0.3 },
+  doneSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center' },
+  countdown: { fontSize: 12, color: D.green, fontWeight: '700', marginTop: 4 },
+
+  // Manual container
+  manualContainer: {
+    flex: 1, padding: 24, gap: 18, justifyContent: 'center',
+  },
+  manualHeader: { alignItems: 'center', gap: 10, marginBottom: 8 },
+  manualTitle: { fontSize: 22, fontWeight: '900', color: D.white, letterSpacing: -0.3 },
+  manualSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center', lineHeight: 20 },
+
+  manualLoteResume: {
+    backgroundColor: D.nfcSurface, borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: D.nfcBorder, gap: 8,
+  },
+  manualLoteLabel: { fontSize: 9, fontWeight: '800', color: D.orange, letterSpacing: 1.6 },
+  manualLoteRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  manualLoteCode: { fontSize: 10, color: D.orange, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontWeight: '600', minWidth: 72 },
+  manualLoteName: { flex: 1, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
+  manualLoteQty: { fontSize: 11, fontWeight: '800', color: D.orange },
+
+  manualInputWrap: { gap: 8 },
+  manualInputLabel: { fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.4)', letterSpacing: 1.6 },
+  manualInput: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: D.nfcSurface, borderRadius: 12,
+    paddingHorizontal: 16, height: 54,
+    borderWidth: 1.5, borderColor: D.nfcBorder,
+  },
+  manualInputText: { flex: 1, fontSize: 16, color: D.white, fontWeight: '600' },
+
+  manualError: {
+    backgroundColor: `${D.red}18`, borderRadius: 10,
+    padding: 12, borderWidth: 1, borderColor: `${D.red}30`,
+  },
+  manualErrorText: { fontSize: 13, color: D.redLight, fontWeight: '600' },
+
+  manualSubmitBtn: {
+    height: 58, borderRadius: 15, backgroundColor: D.orange,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4, shadowRadius: 14, elevation: 8,
+  },
+  manualSubmitBtnDisabled: { backgroundColor: D.iron, shadowOpacity: 0 },
+  manualSubmitText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
+});
+
 // ─── TELA PRINCIPAL ────────────────────────────────────────────────────────────
 export default function AlmoxarifadoScreen() {
   const [minhasFerramentas, setMinhasFerramentas] = useState<Ferramenta[]>([]);
   const [disponíveis, setDisponíveis] = useState<Ferramenta[]>([]);
   const [lote, setLote] = useState<LoteItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [nfcVisible, setNfcVisible] = useState(false);
+  const [libModalVisible, setLibModalVisible] = useState(false);
   const [toastState, setToastState] = useState({ visible: false, msg: '', type: 'success' as 'success' | 'error' });
 
   const headerAnim = useRef(new Animated.Value(0)).current;
@@ -1087,24 +1195,29 @@ export default function AlmoxarifadoScreen() {
     Animated.spring(fabAnim, { toValue: lote.length > 0 ? 1 : 0, tension: 110, friction: 12, useNativeDriver: true }).start();
   }, [lote.length]);
 
+  // ── Carrega ferramentas disponíveis e em custódia via API real ──────────────
   const loadData = async () => {
     try {
       setLoading(true);
       const cracha = await AsyncStorage.getItem('userCracha');
 
-      // Paralelizar chamadas
       const [todasRes, minhasRes] = await Promise.allSettled([
         apiClient.listarFerramentas(),
-        cracha ? apiClient.listarMinhasFerramentas() : Promise.resolve([]),
+        // GET /colaborador/{cracha}/ferramentas — ferramentas do usuário atual
+        cracha ? apiClient.listarMinhasFerramentas(cracha) : Promise.resolve([]),
       ]);
 
-      const todas = todasRes.status === 'fulfilled' ? (todasRes.value || []) : [];
-      const minhas = minhasRes.status === 'fulfilled' ? (minhasRes.value || []) : [];
+      const todas: Ferramenta[] = todasRes.status === 'fulfilled' ? (todasRes.value ?? []) : [];
+      const minhas: Ferramenta[] = minhasRes.status === 'fulfilled' ? (minhasRes.value ?? []) : [];
 
+      // "Minhas ferramentas" = filtrar por alocadoPara que corresponde ao usuário atual
+      // (A API /colaborador/{cracha}/ferramentas já retorna só as do usuário)
       setMinhasFerramentas(minhas.filter((f: Ferramenta) => f.status === 'Em uso'));
       setDisponíveis(todas.filter((f: Ferramenta) => f.status === 'Disponível'));
-    } catch {
+    } catch (err: any) {
+      showToast('Erro ao carregar ferramentas: ' + (err.message || 'Falha na API'), 'error');
       setDisponíveis([]);
+      setMinhasFerramentas([]);
     } finally {
       setLoading(false);
     }
@@ -1112,8 +1225,7 @@ export default function AlmoxarifadoScreen() {
 
   const addToLote = useCallback((ferramenta: Ferramenta) => {
     setLote(prev => {
-      const exists = prev.find(i => i.codigo === ferramenta.codigo);
-      if (exists) return prev; // não duplicar
+      if (prev.find(i => i.codigo === ferramenta.codigo)) return prev;
       return [{ ...ferramenta, qty: 1 }, ...prev];
     });
   }, []);
@@ -1133,39 +1245,31 @@ export default function AlmoxarifadoScreen() {
     ));
   };
 
-  const handleSolicitar = () => {
-    if (lote.length === 0) return;
-    setNfcVisible(true);
+  // ── Callback de sucesso: chama POST /retirar e sincroniza estado ─────────────
+  const handleLibSuccess = async (crachaColaborador: string) => {
+    // POST /retirar — chamada real à API
+    await apiClient.retirar({
+      cracha_colaborador: crachaColaborador,
+      ferramentas: lote.map(f => ({
+        codigo: f.codigo,
+        qtd: f.qty,
+        checklist: 'REALIZADO',
+        observacao: 'Retirada via app Marilan',
+      })),
+    });
+    // Após sucesso: limpa lote e recarrega lista
+    setLote([]);
+    showToast(`✅ ${lote.length} ${lote.length === 1 ? 'ferramenta retirada' : 'ferramentas retiradas'} com sucesso!`, 'success');
+    await loadData();
   };
 
   const handleDevolver = () => {
-    showToast('Em desenvolvimento: fluxo de devolução NFC', 'success');
-  };
-
-  const handleNFCSuccess = async () => {
-    setNfcVisible(false);
-    try {
-      // Commit ao backend
-      await apiClient.retirar({
-        cracha_colaborador: (await AsyncStorage.getItem('userCracha')) || '',
-        ferramentas: lote.map(f => ({
-          codigo: f.codigo,
-          qtd: f.qty,
-          checklist: 'REALIZADO',
-          observacao: 'Liberação em lote via NFC',
-        })),
-      });
-    } catch {
-      // Silent — fluxo NFC já confirmou visualmente
-    }
-    setLote([]);
-    showToast(`🎉 Liberação Concluída! ${lote.length} ${lote.length === 1 ? 'ferramenta retirada' : 'ferramentas retiradas'}`, 'success');
-    await loadData();
+    showToast('Fluxo de devolução em desenvolvimento', 'success');
   };
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToastState({ visible: true, msg, type });
-    setTimeout(() => setToastState(s => ({ ...s, visible: false })), 3500);
+    setTimeout(() => setToastState(s => ({ ...s, visible: false })), 3800);
   };
 
   const isInLote = (codigo: string) => lote.some(i => i.codigo === codigo);
@@ -1179,7 +1283,6 @@ export default function AlmoxarifadoScreen() {
 
       {/* ── Header ─────────────────────────────────────────────────── */}
       <SafeAreaView style={s.headerZone} edges={['top']}>
-        {/* Decoração geométrica */}
         <View style={s.geoDeco} pointerEvents="none">
           {Array.from({ length: 15 }).map((_, i) => (
             <View key={i} style={[s.geoDot, { opacity: i % 3 === 0 ? 0.22 : 0.10 }]} />
@@ -1200,7 +1303,6 @@ export default function AlmoxarifadoScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Stats Bar */}
           <View style={s.statsBar}>
             <View style={s.statItem}>
               <Text style={s.statVal}>{disponíveis.length}</Text>
@@ -1227,14 +1329,14 @@ export default function AlmoxarifadoScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* SEÇÃO 1: Em Custódia */}
+        {/* Minhas ferramentas — reflete exatamente o alocadoPara da API */}
         {minhasFerramentas.length > 0 && (
           <View style={s.section}>
             <MyToolsSection items={minhasFerramentas} onDevolver={handleDevolver} />
           </View>
         )}
 
-        {/* SEÇÃO 2: Lote atual (inline) */}
+        {/* Lote atual */}
         {lote.length > 0 && (
           <View style={s.section}>
             <SectionHdr label="Lote de Retirada" count={totalQty} color={D.orange} />
@@ -1248,12 +1350,12 @@ export default function AlmoxarifadoScreen() {
             ))}
             <View style={s.loteNote}>
               <NFCChipIcon size={14} color={D.orange} />
-              <Text style={s.loteNoteText}>Clique em "Solicitar Liberação" para iniciar o fluxo NFC</Text>
+              <Text style={s.loteNoteText}>Clique em "Solicitar Liberação" para confirmar a retirada via NFC ou crachá manual</Text>
             </View>
           </View>
         )}
 
-        {/* SEÇÃO 3: Ativos Disponíveis */}
+        {/* Ferramentas disponíveis — GET /ferramentas */}
         <View style={s.section}>
           <SectionHdr label="Ativos Disponíveis" count={disponíveis.length} color={D.greenLight} />
 
@@ -1285,16 +1387,16 @@ export default function AlmoxarifadoScreen() {
       {/* FAB */}
       <LoteFooter
         count={totalQty}
-        onSolicitar={handleSolicitar}
+        onSolicitar={() => setLibModalVisible(true)}
         anim={fabAnim}
       />
 
-      {/* NFC Modal Full Screen */}
-      <NFCModal
-        visible={nfcVisible}
+      {/* Modal de Liberação: NFC Simulado + Manual Real */}
+      <LibModal
+        visible={libModalVisible}
         lote={lote}
-        onClose={() => setNfcVisible(false)}
-        onSuccess={handleNFCSuccess}
+        onClose={() => setLibModalVisible(false)}
+        onSuccess={handleLibSuccess}
       />
 
       <Toast message={toastState.msg} visible={toastState.visible} type={toastState.type} />
@@ -1306,7 +1408,6 @@ export default function AlmoxarifadoScreen() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: D.orange },
 
-  // Header
   headerZone: { backgroundColor: D.orange, overflow: 'hidden' },
   geoDeco: {
     position: 'absolute', right: 16, top: 16,
@@ -1338,17 +1439,14 @@ const s = StyleSheet.create({
   statLbl: { fontSize: 9, color: 'rgba(255,255,255,0.55)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
   statDivider: { width: 1, height: 26, backgroundColor: 'rgba(255,255,255,0.14)' },
 
-  // Body
   body: { flex: 1, backgroundColor: D.snow, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   bodyContent: { paddingHorizontal: 16, paddingTop: 18 },
   section: { marginBottom: 6 },
 
   loteNote: {
     flexDirection: 'row', alignItems: 'center', gap: 7,
-    marginTop: 8,
-    paddingVertical: 10, paddingHorizontal: 14,
-    backgroundColor: D.orangeSoft,
-    borderRadius: 10,
+    marginTop: 8, paddingVertical: 10, paddingHorizontal: 14,
+    backgroundColor: D.orangeSoft, borderRadius: 10,
     borderWidth: 1, borderColor: D.orangeLine,
   },
   loteNoteText: { fontSize: 11, color: D.orange, fontWeight: '600', flex: 1 },

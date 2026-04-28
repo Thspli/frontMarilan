@@ -4,6 +4,7 @@
  * Nível: igual às telas de Ferramentas e Almoxarifado
  */
 
+import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -21,6 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { useAuth } from '@/hooks/useAuth';
 import { apiClient, type Ferramenta } from '../../services/api';
 
 // ─── Design System ─────────────────────────────────────────────────────────────
@@ -271,6 +273,9 @@ const tos = StyleSheet.create({
 
 // ─── Main Screen ────────────────────────────────────────────────────────────────
 export default function RelatoriosScreen() {
+  const router = useRouter();
+  const { user, isLoading } = useAuth();
+
   const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
   const [movimentacoesCount, setMovimentacoesCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -315,6 +320,12 @@ export default function RelatoriosScreen() {
       Animated.timing(barAnim, { toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
     }, 500);
   }, []);
+
+  useEffect(() => {
+    if (!isLoading && user?.role === 'colaborador') {
+      router.replace('/(tabs)/ferramentas');
+    }
+  }, [isLoading, user?.role, router]);
 
   useEffect(() => {
     const carregarDados = async () => {

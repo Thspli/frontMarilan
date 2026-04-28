@@ -1,10 +1,10 @@
 import { Tabs } from 'expo-router';
-import React, { useState } from 'react';
+import React from 'react';
 import { Platform, View } from 'react-native';
 
+import { useAuth } from '@/hooks/useAuth';
 import { IconFerramentas } from '@/components/icons/IconFerramentas';
 import { IconAlmoxarifado } from '@/components/icons/IconAlmoxarifado';
-// DICA: Importe o ícone de relatórios aqui (criaremos abaixo)
 import { IconRelatorios } from '@/components/icons/IconRelatorios'; 
 
 export default function TabLayout() {
@@ -13,8 +13,8 @@ export default function TabLayout() {
   const darkOrange = '#A64000'; 
   const appBackgroundColor = '#F8F9FA'; 
 
-  // MOCK DE USUÁRIO: Altere para 'operador' para testar a aba sumindo!
-  const [userRole] = useState('almoxarife'); 
+  const { user, isLoading } = useAuth();
+  const showRelatoriosTab = !isLoading && user?.role === 'almoxarife'; 
 
   return (
     <View style={{ flex: 1, backgroundColor: appBackgroundColor }}>
@@ -62,15 +62,16 @@ export default function TabLayout() {
         />
 
         {/* NOVA TELA PROTEGIDA */}
-        <Tabs.Screen
-          name="relatorios"
-          options={{
-            title: 'Relatórios',
-            // LÓGICA DE ACESSO: Se for almoxarife, o link funciona. Se não, é null (invisível)
-            href: userRole === 'almoxarife' ? '/relatorios' : null,
-            tabBarIcon: ({ color }) => <IconRelatorios size={26} color={color} />,
-          }}
-        />
+        {showRelatoriosTab ? (
+          <Tabs.Screen
+            name="relatorios"
+            options={{
+              title: 'Relatórios',
+              href: '/relatorios',
+              tabBarIcon: ({ color }) => <IconRelatorios size={26} color={color} />,
+            }}
+          />
+        ) : null}
       </Tabs>
     </View>
   );

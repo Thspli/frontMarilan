@@ -1032,10 +1032,16 @@ interface LibModalProps {
 function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
   const [mode, setMode] = useState<LibMode>('nfc');
   const [nfcPhase, setNfcPhase] = useState<NFCPhase>('waiting');
-  const [crachaColaborador, setCrachaColaborador] = useState('');
+  
+  // 1️⃣ MUDANÇA AQUI: Trocámos "crachaColaborador" por "crachaAlmoxarife"
+  const [crachaAlmoxarife, setCrachaAlmoxarife] = useState('');
+  
   const [manualPhase, setManualPhase] = useState<ManualPhase>('form');
   const [manualError, setManualError] = useState('');
-  const [focusedField, setFocusedField] = useState<'colaborador' | null>(null);
+  
+  // 2️⃣ MUDANÇA AQUI: Trocámos o tipo de 'colaborador' para 'almoxarife'
+  const [focusedField, setFocusedField] = useState<'almoxarife' | null>(null);
+  
   const [submitting, setSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(3);
   const bgOpacity = useRef(new Animated.Value(0)).current;
@@ -1049,7 +1055,10 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
     if (visible) {
       setMode('nfc');
       setNfcPhase('waiting');
-      setCrachaColaborador('');
+      
+      // 3️⃣ MUDANÇA AQUI: Usamos a nova função para limpar o campo ao abrir o modal
+      setCrachaAlmoxarife('');
+      
       setManualPhase('form');
       setManualError('');
       setFocusedField(null);
@@ -1103,15 +1112,16 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
 
   // ── Fluxo Manual: Colaborador informa apenas seu próprio crachá ───────────
   const handleManualSubmit = async () => {
-    if (!crachaColaborador.trim()) {
-      setManualError('Informe o seu ID de Colaborador');
+    if (!crachaAlmoxarife.trim()) {
+      setManualError('Informe o ID do Almoxarife para enviar o pedido');
       return;
     }
     try {
       setSubmitting(true);
       setManualPhase('submitting');
       setManualError('');
-      await onSuccess(crachaColaborador.trim(), 'MANUAL');
+      // Envia o crachá do almoxarife para a função onSuccess
+      await onSuccess(crachaAlmoxarife.trim(), 'MANUAL'); 
       setManualPhase('awaiting');
     } catch (e: any) {
       setManualError(e.message || 'Erro ao enviar solicitação');
@@ -1266,28 +1276,28 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
             {/* Campo único: ID do Colaborador */}
             <View style={nm.manualInputWrap}>
               <View style={nm.manualInputLabelRow}>
-                <UserColaboradorIcon size={13} color={D.orange} />
-                <Text style={nm.manualInputLabel}>SEU ID DE COLABORADOR</Text>
+                <KeyAlmoxarifeIcon size={13} color={D.orange} />
+                <Text style={nm.manualInputLabel}>ID DO ALMOXARIFE</Text>
                 <View style={nm.requiredBadge}><Text style={nm.requiredText}>Obrigatório</Text></View>
               </View>
               <View style={[nm.manualInput, {
-                borderColor: focusedField === 'colaborador' ? D.orange : D.nfcBorder,
-                borderWidth: focusedField === 'colaborador' ? 1.8 : 1.5,
+                borderColor: focusedField === 'almoxarife' ? D.orange : D.nfcBorder,
+                borderWidth: focusedField === 'almoxarife' ? 1.8 : 1.5,
               }]}>
-                <UserColaboradorIcon size={16} color={focusedField === 'colaborador' ? D.orange : 'rgba(255,87,34,0.45)'} />
+                <KeyAlmoxarifeIcon size={16} color={focusedField === 'almoxarife' ? D.orange : 'rgba(255,87,34,0.45)'} />
                 <TextInput
                   style={nm.manualInputText}
-                  placeholder="Ex: 1236"
+                  placeholder="Ex: 5012 (ID de quem vai aprovar)"
                   placeholderTextColor="rgba(255,255,255,0.22)"
-                  value={crachaColaborador}
-                  onChangeText={v => { setCrachaColaborador(v); setManualError(''); }}
-                  onFocus={() => setFocusedField('colaborador')}
+                  value={crachaAlmoxarife}
+                  onChangeText={v => { setCrachaAlmoxarife(v); setManualError(''); }}
+                  onFocus={() => setFocusedField('almoxarife')}
                   onBlur={() => setFocusedField(null)}
                   keyboardType="numeric"
                   autoCorrect={false}
                   editable={!submitting}
                 />
-                {crachaColaborador.length > 0 && (
+                {crachaAlmoxarife.length > 0 && (
                   <View style={nm.inputFilledDot} />
                 )}
               </View>
@@ -1316,10 +1326,12 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
             <TouchableOpacity
               style={[
                 nm.manualSubmitBtn,
-                (submitting || !crachaColaborador.trim()) && nm.manualSubmitBtnDisabled,
+                // O botão fica desativado se estiver a enviar OU se o crachá do almoxarife estiver vazio
+                (submitting || !crachaAlmoxarife.trim()) && nm.manualSubmitBtnDisabled,
               ]}
               onPress={handleManualSubmit}
-              disabled={submitting || !crachaColaborador.trim()}
+              // Bloqueia o clique nas mesmas condições
+              disabled={submitting || !crachaAlmoxarife.trim()}
               activeOpacity={0.88}
             >
               {submitting ? (
@@ -1714,34 +1726,39 @@ export default function AlmoxarifadoScreen() {
    * Almoxarife nunca deve chegar aqui via UI normal (FAB oculto),
    * mas adicionamos um guard explícito como segunda camada de defesa.
    */
-  const handleLibSuccess = async (crachaColaborador: string, metodo: 'NFC' | 'MANUAL') => {
+  const handleLibSuccess = async (crachaAlmoxarife: string, metodo: 'NFC' | 'MANUAL') => {
     // ── GUARD: Almoxarife não pode retirar ferramentas para si mesmo ─────────
     if (isAlmoxarife) {
       throw new Error('Almoxarife não pode solicitar ferramentas para si mesmo. Apenas colaboradores podem pedir; o almoxarife aprova.');
     }
 
-    await apiClient.retirar({
-      cracha_colaborador: crachaColaborador,
-      ferramentas: lote.map(f => ({ codigo: f.codigo, qtd: f.qty, checklist: 'REALIZADO', observacao: 'Retirada via app Marilan' })),
+    // NOVIDADE: Em vez de chamar .retirar(), chamamos .criarSolicitacao()
+    await apiClient.criarSolicitacao({
+      cracha_almoxarife: crachaAlmoxarife,
+      ferramentas: lote.map(f => ({ 
+        codigo: f.codigo, 
+        qtd: f.qty, 
+        checklist: 'REALIZADO', 
+        observacao: 'Solicitação via app Marilan' 
+      })),
     });
 
+    // Registamos a intenção de retirada no histórico local do telemóvel
+    const crachaAtual = await AsyncStorage.getItem('userCracha') ?? 'DESCONHECIDO';
     const log: AuditLog = {
       id: genId(),
       timestamp: Date.now(),
-      acao: 'RETIRADA',
+      acao: 'RETIRADA', // Nota: Poderias mudar para 'SOLICITACAO' se preferires no futuro
       ferramentas: lote.map(f => ({ codigo: f.codigo, nome: f.nome, qty: f.qty })),
-      responsavel: crachaColaborador,
+      responsavel: crachaAtual, 
       autorizador: 'PENDENTE_APROVACAO',
       metodo,
     };
     await saveAuditLog(log);
 
-    const custodyTs = await loadCustodyTimestamps();
-    lote.forEach(f => { custodyTs[f.codigo] = Date.now(); });
-    await saveCustodyTimestamps(custodyTs);
-
+    // Esvaziamos o carrinho do colaborador, pois o pedido já foi enviado
     setLote([]);
-    showToast(`✅ Solicitação enviada · ${lote.length} ${lote.length === 1 ? 'ferramenta' : 'ferramentas'}`, 'success');
+    showToast(`✅ Solicitação enviada · Aguardando Almoxarife`, 'success');
     await loadData();
   };
 

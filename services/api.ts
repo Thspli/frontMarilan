@@ -250,6 +250,20 @@ async recusarSolicitacao(id: number): Promise<any> {
     throw new Error(this.extractErrorMessage(error));
   }
 }
+async verificarTrocaRecebida(cracha: string): Promise<{ ferramenta_nome: string; de_nome: string } | null> {
+  try {
+    const response = await this.api.get(`/trocas/recebidas/pendente?cracha=${encodeURIComponent(cracha)}`);
+    return response.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async confirmarVisualizacaoTroca(cracha: string): Promise<void> {
+  try {
+    await this.api.post('/trocas/recebidas/visualizar', { cracha });
+  } catch {}
+}
   /**
    * Verificar se está autenticado
    */

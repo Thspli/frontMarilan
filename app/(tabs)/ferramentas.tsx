@@ -185,14 +185,14 @@ const np = StyleSheet.create({
 function Toast({ message, visible }: { message: string; visible: boolean }) {
   const y = useRef(new Animated.Value(20)).current;
   const op = useRef(new Animated.Value(0)).current;
-  const s = useRef(new Animated.Value(0.94)).current;
+  const sc = useRef(new Animated.Value(0.94)).current;
 
   useEffect(() => {
     if (visible) {
       Animated.parallel([
         Animated.spring(y, { toValue: 0, tension: 130, friction: 11, useNativeDriver: true }),
         Animated.timing(op, { toValue: 1, duration: 220, useNativeDriver: true }),
-        Animated.spring(s, { toValue: 1, tension: 130, friction: 11, useNativeDriver: true }),
+        Animated.spring(sc, { toValue: 1, tension: 130, friction: 11, useNativeDriver: true }),
       ]).start();
     } else {
       Animated.parallel([
@@ -203,7 +203,7 @@ function Toast({ message, visible }: { message: string; visible: boolean }) {
   }, [visible]);
 
   return (
-    <Animated.View style={[ts.wrap, { opacity: op, transform: [{ translateY: y }, { scale: s }] }]} pointerEvents="none">
+    <Animated.View style={[ts.wrap, { opacity: op, transform: [{ translateY: y }, { scale: sc }] }]} pointerEvents="none">
       <View style={ts.pill}>
         <View style={ts.iconBox}>
           <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
@@ -222,12 +222,282 @@ const ts = StyleSheet.create({
   text: { fontSize: 14, fontWeight: '600', color: D.white, flex: 1, letterSpacing: 0.1 },
 });
 
+// ─── Modal de Confirmação de Troca ────────────────────────────────────────────
+function TrocaSuccessModal({
+  visible,
+  ferramenta,
+  outroNome,
+  tipo,
+  onClose,
+}: {
+  visible: boolean;
+  ferramenta: string;
+  outroNome: string;
+  tipo: 'enviou' | 'recebeu';
+  onClose: () => void;
+}) {
+  const bgOp      = useRef(new Animated.Value(0)).current;
+  const cardY     = useRef(new Animated.Value(60)).current;
+  const cardOp    = useRef(new Animated.Value(0)).current;
+  const iconScale = useRef(new Animated.Value(0)).current;
+  const btnScale  = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(bgOp,   { toValue: 1, duration: 280, useNativeDriver: true }),
+          Animated.spring(cardY,  { toValue: 0, tension: 65, friction: 12, useNativeDriver: true }),
+          Animated.timing(cardOp, { toValue: 1, duration: 300, useNativeDriver: true }),
+        ]),
+        Animated.spring(iconScale, { toValue: 1, tension: 80, friction: 7, useNativeDriver: true }),
+      ]).start();
+    } else {
+      bgOp.setValue(0);
+      cardY.setValue(60);
+      cardOp.setValue(0);
+      iconScale.setValue(0);
+    }
+  }, [visible]);
+
+  const handleClose = () => {
+    Animated.sequence([
+      Animated.timing(btnScale, { toValue: 0.96, duration: 60, useNativeDriver: true }),
+      Animated.spring(btnScale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
+    ]).start(() => onClose());
+  };
+
+  const isRecebeu = tipo === 'recebeu';
+
+  return (
+    <Modal transparent visible={visible} animationType="none" statusBarTranslucent onRequestClose={onClose}>
+      <Animated.View style={[tsm.backdrop, { opacity: bgOp }]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+      </Animated.View>
+
+      <Animated.View style={[tsm.card, { opacity: cardOp, transform: [{ translateY: cardY }] }]}>
+        {/* Ícone animado */}
+        <Animated.View style={[tsm.iconRing, { transform: [{ scale: iconScale }] }]}>
+          <View style={tsm.iconInner}>
+            <Svg width={36} height={36} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M20 6L9 17L4 12"
+                stroke={D.green} strokeWidth={2.8}
+                strokeLinecap="round" strokeLinejoin="round"
+              />
+            </Svg>
+          </View>
+        </Animated.View>
+
+        {/* Badge */}
+        <View style={[tsm.badge, isRecebeu && tsm.badgeOrange]}>
+          <View style={[tsm.badgeDot, isRecebeu && tsm.badgeDotOrange]} />
+          <Text style={[tsm.badgeText, isRecebeu && tsm.badgeTextOrange]}>
+            {isRecebeu ? 'FERRAMENTA RECEBIDA' : 'TRANSFERÊNCIA CONCLUÍDA'}
+          </Text>
+        </View>
+
+        {/* Título */}
+        <Text style={tsm.title}>
+          {isRecebeu ? 'Você recebeu uma\nferramenta!' : 'Transferência\nrealizada!'}
+        </Text>
+
+        {/* Detalhes */}
+        <View style={tsm.detailCard}>
+          <View style={tsm.detailRow}>
+            <View style={tsm.detailIconBox}>
+              <WrenchIcon size={15} color={D.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={tsm.detailLabel}>FERRAMENTA</Text>
+              <Text style={tsm.detailValue}>{ferramenta}</Text>
+            </View>
+          </View>
+
+          <View style={tsm.detailSep} />
+
+          <View style={tsm.detailRow}>
+            <View style={tsm.detailIconBox}>
+              <UserIcon size={15} color={D.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={tsm.detailLabel}>{isRecebeu ? 'ENVIADO POR' : 'ENVIADO PARA'}</Text>
+              <Text style={tsm.detailValue}>{outroNome}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Botão */}
+        <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }] }}>
+          <TouchableOpacity style={tsm.btn} onPress={handleClose} activeOpacity={0.88}>
+            <Text style={tsm.btnText}>Entendido</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+const tsm = StyleSheet.create({
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(26,21,16,0.6)',
+  },
+  card: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    backgroundColor: D.white,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: 28,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 36,
+    alignItems: 'center',
+    gap: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  iconRing: {
+    width: 96, height: 96, borderRadius: 48,
+    backgroundColor: D.greenBg,
+    borderWidth: 1.5,
+    borderColor: `${D.green}30`,
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 16,
+  },
+  iconInner: {
+    width: 70, height: 70, borderRadius: 35,
+    backgroundColor: D.greenBg,
+    borderWidth: 1,
+    borderColor: `${D.green}40`,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  badge: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: D.greenBg,
+    borderRadius: 99,
+    paddingVertical: 6, paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: `${D.green}30`,
+  },
+  badgeOrange: {
+    backgroundColor: D.orangeDim,
+    borderColor: `${D.orange}30`,
+  },
+  badgeDot: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: D.green,
+  },
+  badgeDotOrange: { backgroundColor: D.orange },
+  badgeText: {
+    fontSize: 10, fontWeight: '800',
+    color: D.green, letterSpacing: 1.4,
+  },
+  badgeTextOrange: { color: D.orange },
+  title: {
+    fontSize: 26, fontWeight: '900',
+    color: D.black, letterSpacing: -0.5,
+    textAlign: 'center', lineHeight: 34,
+  },
+  detailCard: {
+    width: '100%',
+    backgroundColor: D.gray50,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: D.gray200,
+    gap: 12,
+  },
+  detailRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+  },
+  detailIconBox: {
+    width: 36, height: 36, borderRadius: 9,
+    backgroundColor: D.orangeDim,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  detailLabel: {
+    fontSize: 9, fontWeight: '800',
+    color: D.gray400, letterSpacing: 1.2,
+  },
+  detailValue: {
+    fontSize: 14, fontWeight: '700',
+    color: D.black, marginTop: 2,
+  },
+  detailSep: {
+    height: 1, backgroundColor: D.gray200,
+  },
+  btn: {
+    width: '100%', height: 56,
+    borderRadius: 14,
+    backgroundColor: D.orange,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: D.orangeDark,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 12,
+    elevation: 6,
+  },
+  btnText: {
+    fontSize: 16, fontWeight: '800',
+    color: D.white, letterSpacing: 0.2,
+  },
+});
+
+// ─── Hook: polling para quem recebeu a ferramenta ──────────────────────────────
+function useTrocaRecebidaListener() {
+  const [trocaRecebida, setTrocaRecebida] = useState<{
+    ferramenta: string;
+    deNome: string;
+  } | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const intervaloRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const buscandoRef  = useRef(false);
+
+  useEffect(() => {
+    const verificar = async () => {
+      if (buscandoRef.current) return;
+      buscandoRef.current = true;
+      try {
+        const cracha = await AsyncStorage.getItem('userCracha');
+        if (!cracha) return;
+        const response = await apiClient.verificarTrocaRecebida(cracha);
+        if (response) {
+          setTrocaRecebida({ ferramenta: response.ferramenta_nome, deNome: response.de_nome });
+          setModalVisible(true);
+        }
+      } catch {
+        // silencioso
+      } finally {
+        buscandoRef.current = false;
+      }
+    };
+
+    verificar();
+    intervaloRef.current = setInterval(verificar, 8000);
+    return () => { if (intervaloRef.current) clearInterval(intervaloRef.current); };
+  }, []);
+
+  const fechar = async () => {
+    try {
+      const cracha = await AsyncStorage.getItem('userCracha');
+      if (cracha) await apiClient.confirmarVisualizacaoTroca(cracha);
+    } catch {}
+    setModalVisible(false);
+    setTrocaRecebida(null);
+  };
+
+  return { trocaRecebida, modalVisible, fechar };
+}
+
 // ─── Swap Modal ────────────────────────────────────────────────────────────────
 function SwapModal({ visible, tool, onClose, onSuccess }: {
   visible: boolean;
   tool: Ferramenta | null;
   onClose: () => void;
-  onSuccess: (codigo: string) => void;
+  onSuccess: (codigo: string, paraNome: string) => void;
 }) {
   const [cracha, setCracha] = useState('');
   const [obs, setObs] = useState('');
@@ -271,7 +541,7 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
         ferramentas: [{ codigo: tool.codigo, qtd: 1, checklist: 'REALIZADO', observacao: obs.trim() || 'Troca via app' }],
       });
       close();
-      setTimeout(() => onSuccess(tool.codigo), 320);
+      setTimeout(() => onSuccess(tool.nome, cracha.trim()), 320);
     } catch (e: any) {
       Alert.alert('Erro', e.message || 'Falha ao transferir');
     } finally {
@@ -462,15 +732,12 @@ function ToolCard({ item, index, onPress }: { item: Ferramenta; index: number; o
   return (
     <Animated.View style={[tc.outer, { opacity: op, transform: [{ translateY: oy }, { scale: sc }] }]}>
       <TouchableOpacity style={[tc.card, isInUse && tc.cardInteractive]} onPress={press} activeOpacity={1}>
-        {/* Left accent bar */}
         {isInUse && <View style={tc.accent} />}
 
-        {/* Icon */}
         <View style={[tc.iconBox, isInUse && tc.iconBoxRed]}>
           <WrenchIcon size={18} color={isInUse ? D.red : D.orange} />
         </View>
 
-        {/* Content */}
         <View style={tc.content}>
           <View style={tc.topRow}>
             <Text style={tc.name} numberOfLines={1}>{item.nome}</Text>
@@ -546,6 +813,13 @@ export default function FerramentasScreen() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ visible: false, msg: '' });
 
+  // Modal de confirmação — quem enviou
+  const [trocaEnviada, setTrocaEnviada] = useState<{ ferramenta: string; paraNome: string } | null>(null);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+
+  // Polling — quem recebeu
+  const { trocaRecebida, modalVisible: recebidaVisible, fechar: fecharRecebida } = useTrocaRecebidaListener();
+
   // Header anims
   const headerAnim = useRef(new Animated.Value(0)).current;
   const statAnim1 = useRef(new Animated.Value(0)).current;
@@ -605,7 +879,6 @@ export default function FerramentasScreen() {
 
       {/* Header */}
       <SafeAreaView style={s.headerZone} edges={['top']}>
-        {/* Decorative dot grid */}
         <View style={s.dotGrid} pointerEvents="none">
           {Array.from({ length: 16 }).map((_, i) => (
             <View key={i} style={s.dot} />
@@ -626,7 +899,6 @@ export default function FerramentasScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Stats row */}
           <View style={s.statsBar}>
             <StatBox value={counts['Disponível']} label="Disponíveis" anim={statAnim1} />
             <View style={s.statsDivider} />
@@ -639,7 +911,6 @@ export default function FerramentasScreen() {
 
       {/* Body */}
       <View style={s.body}>
-        {/* Search */}
         <View style={s.searchRow}>
           <View style={s.searchBox}>
             <SearchIcon size={16} color={query ? D.orange : D.gray400} />
@@ -662,7 +933,6 @@ export default function FerramentasScreen() {
 
         <FilterChips active={filter} onSelect={setFilter} counts={counts} />
 
-        {/* List */}
         {loading ? (
           <View style={s.loadState}>
             <ActivityIndicator color={D.orange} size="large" />
@@ -688,12 +958,36 @@ export default function FerramentasScreen() {
         )}
       </View>
 
+      {/* Modal de transferência */}
       <SwapModal
         visible={modalVisible}
         tool={selected}
         onClose={() => { setModalVisible(false); setTimeout(() => setSelected(null), 400); }}
-        onSuccess={c => { showToast(`Ferramenta ${c} transferida!`); setTimeout(load, 900); }}
+        onSuccess={(ferramenta, paraNome) => {
+          setTrocaEnviada({ ferramenta, paraNome });
+          setSuccessModalVisible(true);
+          setTimeout(load, 900);
+        }}
       />
+
+      {/* Confirmação — quem ENVIOU */}
+      <TrocaSuccessModal
+        visible={successModalVisible}
+        ferramenta={trocaEnviada?.ferramenta ?? ''}
+        outroNome={trocaEnviada?.paraNome ?? ''}
+        tipo="enviou"
+        onClose={() => { setSuccessModalVisible(false); setTrocaEnviada(null); }}
+      />
+
+      {/* Confirmação — quem RECEBEU (via polling) */}
+      <TrocaSuccessModal
+        visible={recebidaVisible}
+        ferramenta={trocaRecebida?.ferramenta ?? ''}
+        outroNome={trocaRecebida?.deNome ?? ''}
+        tipo="recebeu"
+        onClose={fecharRecebida}
+      />
+
       <Toast message={toast.msg} visible={toast.visible} />
     </View>
   );
@@ -715,7 +1009,6 @@ const s = StyleSheet.create({
   refreshBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
   statsBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.14)', borderRadius: 16, paddingVertical: 14, paddingHorizontal: 6 },
   statsDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.15)' },
-
   body: { flex: 1, backgroundColor: D.offWhite, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingTop: 18, overflow: 'hidden' },
   searchRow: { paddingHorizontal: 18 },
   searchBox: {
@@ -725,12 +1018,9 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: D.gray200,
   },
   searchInput: { flex: 1, fontSize: 14, color: D.black, fontWeight: '500' },
-
   listContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 28 },
-
   loadState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadText: { fontSize: 14, color: D.gray500, fontWeight: '500' },
-
   empty: { alignItems: 'center', paddingTop: 60, gap: 8 },
   emptyIcon: { fontSize: 44 },
   emptyTitle: { fontSize: 17, fontWeight: '800', color: D.gray700 },

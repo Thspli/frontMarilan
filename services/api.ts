@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance } from 'axios';
 import * as FileSystem from 'expo-file-system';
 
-const API_BASE_URL = 'https://defeat-forgotten-reduction-compared.trycloudflare.com/api';
+const API_BASE_URL = 'https://defeat-for    gotten-reduction-compared.trycloudflare.com/api';
 
 interface LoginRequest {
   cracha: string;
@@ -270,6 +270,19 @@ export class APIClient {
         ...item,
         alocadoPara: item.alocadoPara ?? item.alocado ?? item.alocado_para ?? undefined,
       }));
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  /**
+   * ─── BUSCA DE USUÁRIO VIA NFC ────────────────────────────────────────────
+   */
+  async buscarUsuarioPorNFC(nfcId: string): Promise<{ cracha: string; nome: string; role: string }> {
+    try {
+      // O nfcId normalmente vem como hexadecimal do chip
+      const response = await this.api.get(`/usuario/por-nfc/${nfcId}`);
+      return response.data;
     } catch (error) {
       throw new Error(this.extractErrorMessage(error));
     }

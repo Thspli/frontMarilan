@@ -42,6 +42,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { apiClient } from '../../services/api';
+import { nfcService } from '../../services/nfc'; // <-- ADICIONE ESTA LINHA
 import { useAuth } from '@/hooks/useAuth';
 import { useSolicitacoesListener } from '../../hooks/useSolicitacoesListener';
 import { useNotificacoes } from '@/hooks/useNotificacoes';
@@ -1044,20 +1045,14 @@ interface LibModalProps {
 function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
   const [mode, setMode] = useState<LibMode>('nfc');
   const [nfcPhase, setNfcPhase] = useState<NFCPhase>('waiting');
-
-  // 1️⃣ MUDANÇA AQUI: Trocámos "crachaColaborador" por "crachaAlmoxarife"
   const [crachaAlmoxarife, setCrachaAlmoxarife] = useState('');
-
   const [solicitacaoId, setSolicitacaoId] = useState<number | null>(null);
-
   const [manualPhase, setManualPhase] = useState<ManualPhase>('form');
   const [manualError, setManualError] = useState('');
-
-  // 2️⃣ MUDANÇA AQUI: Trocámos o tipo de 'colaborador' para 'almoxarife'
   const [focusedField, setFocusedField] = useState<'almoxarife' | null>(null);
-
   const [submitting, setSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(3);
+  
   const bgOpacity = useRef(new Animated.Value(0)).current;
   const contentSlide = useRef(new Animated.Value(60)).current;
   const contentOpacity = useRef(new Animated.Value(0)).current;
@@ -1065,14 +1060,12 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
   const countdownAnim = useRef(new Animated.Value(1)).current;
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // 1. ANIMAÇÕES DE ABERTURA
   useEffect(() => {
     if (visible) {
       setMode('nfc');
       setNfcPhase('waiting');
-
-      // 3️⃣ MUDANÇA AQUI: Usamos a nova função para limpar o campo ao abrir o modal
       setCrachaAlmoxarife('');
-
       setManualPhase('form');
       setManualError('');
       setFocusedField(null);
@@ -1088,6 +1081,63 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
       if (countdownRef.current) clearInterval(countdownRef.current);
     }
   }, [visible]);
+
+  // 2. A MÁGICA DO NFC: Fica ouvindo enquanto estiver na tela NFC
+  useEffect(() => {
+    let isReading = false;
+    
+    const startNfcRead = async () => {
+      isReading = true;
+      try {
+        const res = await nfcService.readTag();
+        if (!isReading) return; // Se o modal fechou antes de ler, aborta
+
+        if (res.success && res.data) {
+          setNfcPhase('simulated_connected'); // Muda a UI para mostrar que leu o chip
+          
+          try {
+            // Vai na API descobrir de quem é o chip
+            const usuario = await apiClient.buscarUsuarioPorNFC(res.data);
+            
+            // Trava de segurança: Se o chip não for de um almoxarife, bloqueia!
+            if (usuario.role !== 'almoxarife') {
+              setManualError(`O crachá lido pertence a ${usuario.nome}, que não é um Almoxarife.`);
+              setNfcPhase('error');
+              return;
+            }
+
+            // Deu certo! Salva o crachá e vai pra tela de confirmação final
+            setCrachaAlmoxarife(usuario.cracha);
+            setTimeout(() => setNfcPhase('confirming'), 600);
+            
+          } catch (apiErr) {
+            // MUDANÇA AQUI: Adicione este Alert para você ver o ID!
+            Alert.alert(
+              "Tag Não Cadastrada", 
+              `O ID deste chip é:\n\n${res.data}\n\nColoque este código na coluna nfc_id do Almoxarife no banco de dados.`
+            );
+            
+            setManualError('Tag NFC não cadastrada ou erro de rede.');
+            setNfcPhase('error');
+          }
+        } else if (res.error !== 'Leitura cancelada') {
+          setManualError(res.error || 'Erro ao ler chip.');
+          setNfcPhase('error');
+        }
+      } catch (err) {
+        if (isReading) setNfcPhase('error');
+      }
+    };
+
+    if (visible && mode === 'nfc' && nfcPhase === 'waiting') {
+      startNfcRead();
+    }
+
+    return () => {
+      isReading = false;
+      nfcService.stop();
+    };
+  }, [visible, mode, nfcPhase]);
 
   const handleClose = () => {
     if (countdownRef.current) clearInterval(countdownRef.current);
@@ -1111,20 +1161,26 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
     }, 1000);
   };
 
+  // Botão "Simular" mantido para quando você testar em Emulador sem NFC físico
   const handleSimulateNFC = () => { setNfcPhase('simulated_connected'); setTimeout(() => setNfcPhase('confirming'), 900); };
 
+  // 3. ENVIO FINAL PELO NFC
   const handleNFCConfirm = async () => {
     setNfcPhase('submitting');
     try {
-      const crachaAtual = await AsyncStorage.getItem('userCracha') ?? '0000';
-      await onSuccess(crachaAtual, 'NFC');
+      // Passamos o crachá do Almoxarife que foi lido pela Tag
+      const newId = await onSuccess(crachaAlmoxarife, 'NFC');
+      setSolicitacaoId(newId);
       setNfcPhase('done');
       Animated.spring(successScale, { toValue: 1, tension: 80, friction: 8, useNativeDriver: true }).start();
       startCountdown();
-    } catch { setNfcPhase('error'); }
+    } catch (e: any) { 
+      setManualError(e.message || 'Erro ao processar');
+      setNfcPhase('error'); 
+    }
   };
 
-  // ── Fluxo Manual: Colaborador informa apenas seu próprio crachá ───────────
+  // 4. ENVIO FINAL MANUAL
   const handleManualSubmit = async () => {
     if (!crachaAlmoxarife.trim()) {
       setManualError('Informe o ID do Almoxarife para enviar o pedido');
@@ -1134,8 +1190,8 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
       setSubmitting(true);
       setManualPhase('submitting');
       setManualError('');
-      // Envia o crachá do almoxarife para a função onSuccess
-      await onSuccess(crachaAlmoxarife.trim(), 'MANUAL');
+      const newId = await onSuccess(crachaAlmoxarife.trim(), 'MANUAL');
+      setSolicitacaoId(newId);
       setManualPhase('awaiting');
     } catch (e: any) {
       setManualError(e.message || 'Erro ao enviar solicitação');
@@ -1147,12 +1203,12 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
 
   const getNFCText = () => {
     switch (nfcPhase) {
-      case 'waiting': return { title: 'Aguardando NFC', sub: 'Aproxime o celular do leitor do Almoxarife', color: D.orange };
+      case 'waiting': return { title: 'Aguardando NFC', sub: 'Aproxime o celular do crachá do Almoxarife', color: D.orange };
       case 'simulated_connected': return { title: 'Leitor Detectado!', sub: 'Sincronizando lote…', color: D.orange };
       case 'confirming': return { title: 'Confirme a Solicitação', sub: 'Verifique os itens antes de enviar', color: D.orange };
       case 'submitting': return { title: 'Enviando…', sub: 'Aguardando resposta da API', color: D.amber };
       case 'done': return { title: 'Solicitação Enviada!', sub: `Encerrando em ${countdown}s…`, color: D.green };
-      case 'error': return { title: 'Erro no envio', sub: 'Tente via Identificação Manual', color: D.red };
+      case 'error': return { title: 'Erro na leitura', sub: manualError || 'Tente novamente ou use Manual', color: D.red };
     }
   };
 
@@ -1222,10 +1278,10 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
                   ))}
                 </View>
               )}
-              {nfcPhase === 'waiting' && (
+              {nfcPhase === 'waiting' && __DEV__ && (
                 <View style={nm.waitingSection}>
                   <TouchableOpacity style={nm.simBtn} onPress={handleSimulateNFC} activeOpacity={0.6}>
-                    <Text style={nm.simBtnText}>Simular Aproximação NFC</Text>
+                    <Text style={nm.simBtnText}>Simular Aproximação (Dev)</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -1243,10 +1299,17 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               )}
               {nfcPhase === 'error' && (
                 <View style={nm.errorCard}>
-                  <Text style={nm.errorText}>Falha no envio. Tente pelo modo Manual.</Text>
-                  <TouchableOpacity onPress={() => { setMode('manual'); setNfcPhase('waiting'); }} style={nm.errorSwitchBtn}>
-                    <Text style={nm.errorSwitchText}>Ir para Manual</Text>
-                  </TouchableOpacity>
+                  <Text style={nm.errorText}>{manualError || 'Falha no envio. Tente novamente.'}</Text>
+                  
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                    <TouchableOpacity onPress={() => { setMode('manual'); setNfcPhase('waiting'); }} style={[nm.errorSwitchBtn, { flex: 1, alignItems: 'center' }]}>
+                      <Text style={nm.errorSwitchText}>Ir para Manual</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity onPress={() => { setManualError(''); setNfcPhase('waiting'); }} style={[nm.errorSwitchBtn, { flex: 1, alignItems: 'center', borderColor: D.orange }]}>
+                      <Text style={[nm.errorSwitchText, { color: D.orange }]}>Tentar de Novo</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
               {nfcPhase === 'done' && (
@@ -1265,12 +1328,12 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
         {mode === 'manual' && manualPhase === 'awaiting' && (
           <AwaitingConfirmationScreen
             lote={lote}
-            solicitacaoId={solicitacaoId || 0} // <--- Passa o ID!
+            solicitacaoId={solicitacaoId || 0}
             onClose={handleClose}
           />
         )}
 
-        {/* ── Fluxo Manual — Formulário (apenas crachá do colaborador) ── */}
+        {/* ── Fluxo Manual — Formulário ── */}
         {mode === 'manual' && manualPhase !== 'awaiting' && (
           <KeyboardAvoidingView style={nm.manualContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={nm.manualHeader}>
@@ -1291,7 +1354,6 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               ))}
             </View>
 
-            {/* Campo único: ID do Colaborador */}
             <View style={nm.manualInputWrap}>
               <View style={nm.manualInputLabelRow}>
                 <KeyAlmoxarifeIcon size={13} color={D.orange} />
@@ -1321,7 +1383,6 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               </View>
             </View>
 
-            {/* Info box: fluxo explicado */}
             <View style={nm.flowInfoBox}>
               <View style={nm.flowStep}>
                 <View style={[nm.flowStepDot, { backgroundColor: D.orange }]} />
@@ -1344,11 +1405,9 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
             <TouchableOpacity
               style={[
                 nm.manualSubmitBtn,
-                // O botão fica desativado se estiver a enviar OU se o crachá do almoxarife estiver vazio
                 (submitting || !crachaAlmoxarife.trim()) && nm.manualSubmitBtnDisabled,
               ]}
               onPress={handleManualSubmit}
-              // Bloqueia o clique nas mesmas condições
               disabled={submitting || !crachaAlmoxarife.trim()}
               activeOpacity={0.88}
             >

@@ -405,16 +405,39 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
   const btnScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    let isReading = true;
+
     if (visible) {
       setCracha(''); setObs(''); setLoading(false);
-      nfcService.readTag().catch(() => {});
+      
       Animated.parallel([
         Animated.spring(slideY, { toValue: 0, tension: 68, friction: 13, useNativeDriver: true }),
         Animated.timing(bgOp, { toValue: 1, duration: 280, useNativeDriver: true }),
       ]).start();
+
+      // INICIA O LEITOR NFC
+      const readNfc = async () => {
+        try {
+          const res = await nfcService.readTag();
+          if (isReading && res.success && res.data) {
+             // Traduz a tag para o Crachá usando a API
+             const user = await apiClient.buscarUsuarioPorNFC(res.data);
+             setCracha(user.cracha); // Auto-preenche o campo!
+          }
+        } catch(e) {
+           // Ignora erro silenciamente para não atrapalhar quem for digitar manual
+        }
+      };
+      
+      readNfc();
+      
     } else {
       slideY.setValue(400); bgOp.setValue(0);
+      isReading = false;
+      nfcService.stop();
     }
+
+    return () => { isReading = false; nfcService.stop(); };
   }, [visible]);
 
   const close = () => {
@@ -468,18 +491,21 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
         </View>
         <View style={ms.sep} />
         <View style={ms.body}>
-          <NFCPulse active={true} />
+          
+          {/* Animação que avisa que o leitor está ativo */}
+          <NFCPulse active={!cracha} /> 
+          
           <Text style={ms.title}>Transferir Ferramenta</Text>
-          <Text style={ms.sub}>Insira o crachá do colaborador{'\n'}que receberá esta ferramenta</Text>
-          <View style={ms.inputWrap}>
+          <Text style={ms.sub}>Aproxime o celular do crachá do parceiro{'\n'}ou digite o número manualmente</Text>
+          <View style={[ms.inputWrap, cracha.length > 0 && { borderColor: D.green, borderWidth: 2 }]}>
             <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
-              <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
-              <Circle cx={9} cy={12} r={2.5} stroke={D.orange} strokeWidth={1.6} />
-              <Path d="M14 10h4M14 14h3" stroke={D.orange} strokeWidth={1.5} strokeLinecap="round" />
+              <Rect x={2} y={5} width={20} height={14} rx={2} stroke={cracha ? D.green : D.orange} strokeWidth={1.8} />
+              <Circle cx={9} cy={12} r={2.5} stroke={cracha ? D.green : D.orange} strokeWidth={1.6} />
+              <Path d="M14 10h4M14 14h3" stroke={cracha ? D.green : D.orange} strokeWidth={1.5} strokeLinecap="round" />
             </Svg>
             <TextInput
               style={ms.input}
-              placeholder="Crachá do colaborador"
+              placeholder="Aproxime o NFC ou digite..."
               placeholderTextColor={D.gray300}
               value={cracha}
               onChangeText={setCracha}

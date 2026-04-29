@@ -224,7 +224,32 @@ export class APIClient {
       throw new Error(this.extractErrorMessage(error));
     }
   }
+async listarSolicitacoesPendentes(): Promise<any> {
+  try {
+    const response = await this.api.get('/solicitacoes/pendentes');
+    return response.data;
+  } catch (error) {
+    throw new Error(this.extractErrorMessage(error));
+  }
+}
 
+async aprovarSolicitacao(id: number): Promise<any> {
+  try {
+    const response = await this.api.post(`/solicitacoes/${id}/aprovar`);
+    return response.data;
+  } catch (error) {
+    throw new Error(this.extractErrorMessage(error));
+  }
+}
+
+async recusarSolicitacao(id: number): Promise<any> {
+  try {
+    const response = await this.api.post(`/solicitacoes/${id}/recusar`);
+    return response.data;
+  } catch (error) {
+    throw new Error(this.extractErrorMessage(error));
+  }
+}
   /**
    * Verificar se está autenticado
    */

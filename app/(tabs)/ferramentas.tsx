@@ -1,6 +1,16 @@
 /**
- * app/(tabs)/ferramentas.tsx — Marilan v2 Premium
- * Design: Industrial Precision · Laranja Marilan + Branco
+ * app/(tabs)/ferramentas.tsx — Marilan v3.0
+ *
+ * RBAC v3 — Transferência P2P condicional por role:
+ *
+ *   COLABORADOR  → Pode transferir ferramentas que estão em seu nome.
+ *                  Botão "Toque para transferir" e SwapModal visíveis.
+ *
+ *   ALMOXARIFE   → Visão read-only do inventário completo.
+ *                  Sem botão de troca — Almoxarife gerencia estoque,
+ *                  não trabalha em campo com as ferramentas.
+ *
+ * O hook useAuth() fornece o role — mesma fonte usada em almoxarifado e relatorios.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -25,6 +35,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { apiClient } from '../../services/api';
 import { nfcService } from '../../services/nfc';
+import { useAuth } from '@/hooks/useAuth';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -111,6 +122,14 @@ const NFCIcon = ({ size = 38, color = D.orange }: { size?: number; color?: strin
 const ArrowRight = ({ color = D.white }: { color?: string }) => (
   <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
     <Path d="M5 12h14M12 5l7 7-7 7" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+// ─── Ícone de bloqueio (Almoxarife read-only) ─────────────────────────────────
+const EyeIcon = ({ size = 12, color = D.gray500 }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={1.8} />
   </Svg>
 );
 
@@ -224,17 +243,10 @@ const ts = StyleSheet.create({
 
 // ─── Modal de Confirmação de Troca ────────────────────────────────────────────
 function TrocaSuccessModal({
-  visible,
-  ferramenta,
-  outroNome,
-  tipo,
-  onClose,
+  visible, ferramenta, outroNome, tipo, onClose,
 }: {
-  visible: boolean;
-  ferramenta: string;
-  outroNome: string;
-  tipo: 'enviou' | 'recebeu';
-  onClose: () => void;
+  visible: boolean; ferramenta: string; outroNome: string;
+  tipo: 'enviou' | 'recebeu'; onClose: () => void;
 }) {
   const bgOp      = useRef(new Animated.Value(0)).current;
   const cardY     = useRef(new Animated.Value(60)).current;
@@ -253,10 +265,7 @@ function TrocaSuccessModal({
         Animated.spring(iconScale, { toValue: 1, tension: 80, friction: 7, useNativeDriver: true }),
       ]).start();
     } else {
-      bgOp.setValue(0);
-      cardY.setValue(60);
-      cardOp.setValue(0);
-      iconScale.setValue(0);
+      bgOp.setValue(0); cardY.setValue(60); cardOp.setValue(0); iconScale.setValue(0);
     }
   }, [visible]);
 
@@ -274,60 +283,38 @@ function TrocaSuccessModal({
       <Animated.View style={[tsm.backdrop, { opacity: bgOp }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
       </Animated.View>
-
       <Animated.View style={[tsm.card, { opacity: cardOp, transform: [{ translateY: cardY }] }]}>
-        {/* Ícone animado */}
         <Animated.View style={[tsm.iconRing, { transform: [{ scale: iconScale }] }]}>
           <View style={tsm.iconInner}>
             <Svg width={36} height={36} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M20 6L9 17L4 12"
-                stroke={D.green} strokeWidth={2.8}
-                strokeLinecap="round" strokeLinejoin="round"
-              />
+              <Path d="M20 6L9 17L4 12" stroke={D.green} strokeWidth={2.8} strokeLinecap="round" strokeLinejoin="round" />
             </Svg>
           </View>
         </Animated.View>
-
-        {/* Badge */}
         <View style={[tsm.badge, isRecebeu && tsm.badgeOrange]}>
           <View style={[tsm.badgeDot, isRecebeu && tsm.badgeDotOrange]} />
           <Text style={[tsm.badgeText, isRecebeu && tsm.badgeTextOrange]}>
             {isRecebeu ? 'FERRAMENTA RECEBIDA' : 'TRANSFERÊNCIA CONCLUÍDA'}
           </Text>
         </View>
-
-        {/* Título */}
-        <Text style={tsm.title}>
-          {isRecebeu ? 'Você recebeu uma\nferramenta!' : 'Transferência\nrealizada!'}
-        </Text>
-
-        {/* Detalhes */}
+        <Text style={tsm.title}>{isRecebeu ? 'Você recebeu uma\nferramenta!' : 'Transferência\nrealizada!'}</Text>
         <View style={tsm.detailCard}>
           <View style={tsm.detailRow}>
-            <View style={tsm.detailIconBox}>
-              <WrenchIcon size={15} color={D.orange} />
-            </View>
+            <View style={tsm.detailIconBox}><WrenchIcon size={15} color={D.orange} /></View>
             <View style={{ flex: 1 }}>
               <Text style={tsm.detailLabel}>FERRAMENTA</Text>
               <Text style={tsm.detailValue}>{ferramenta}</Text>
             </View>
           </View>
-
           <View style={tsm.detailSep} />
-
           <View style={tsm.detailRow}>
-            <View style={tsm.detailIconBox}>
-              <UserIcon size={15} color={D.orange} />
-            </View>
+            <View style={tsm.detailIconBox}><UserIcon size={15} color={D.orange} /></View>
             <View style={{ flex: 1 }}>
               <Text style={tsm.detailLabel}>{isRecebeu ? 'ENVIADO POR' : 'ENVIADO PARA'}</Text>
               <Text style={tsm.detailValue}>{outroNome}</Text>
             </View>
           </View>
         </View>
-
-        {/* Botão */}
         <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }] }}>
           <TouchableOpacity style={tsm.btn} onPress={handleClose} activeOpacity={0.88}>
             <Text style={tsm.btnText}>Entendido</Text>
@@ -339,119 +326,30 @@ function TrocaSuccessModal({
 }
 
 const tsm = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(26,21,16,0.6)',
-  },
-  card: {
-    position: 'absolute',
-    bottom: 0, left: 0, right: 0,
-    backgroundColor: D.white,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingHorizontal: 28,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 50 : 36,
-    alignItems: 'center',
-    gap: 18,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    elevation: 20,
-  },
-  iconRing: {
-    width: 96, height: 96, borderRadius: 48,
-    backgroundColor: D.greenBg,
-    borderWidth: 1.5,
-    borderColor: `${D.green}30`,
-    alignItems: 'center', justifyContent: 'center',
-    marginTop: 16,
-  },
-  iconInner: {
-    width: 70, height: 70, borderRadius: 35,
-    backgroundColor: D.greenBg,
-    borderWidth: 1,
-    borderColor: `${D.green}40`,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  badge: {
-    flexDirection: 'row', alignItems: 'center', gap: 7,
-    backgroundColor: D.greenBg,
-    borderRadius: 99,
-    paddingVertical: 6, paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: `${D.green}30`,
-  },
-  badgeOrange: {
-    backgroundColor: D.orangeDim,
-    borderColor: `${D.orange}30`,
-  },
-  badgeDot: {
-    width: 6, height: 6, borderRadius: 3,
-    backgroundColor: D.green,
-  },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(26,21,16,0.6)' },
+  card: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: D.white, borderTopLeftRadius: 32, borderTopRightRadius: 32, paddingHorizontal: 28, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 50 : 36, alignItems: 'center', gap: 18, shadowColor: '#000', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 20 },
+  iconRing: { width: 96, height: 96, borderRadius: 48, backgroundColor: D.greenBg, borderWidth: 1.5, borderColor: `${D.green}30`, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  iconInner: { width: 70, height: 70, borderRadius: 35, backgroundColor: D.greenBg, borderWidth: 1, borderColor: `${D.green}40`, alignItems: 'center', justifyContent: 'center' },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: D.greenBg, borderRadius: 99, paddingVertical: 6, paddingHorizontal: 14, borderWidth: 1, borderColor: `${D.green}30` },
+  badgeOrange: { backgroundColor: D.orangeDim, borderColor: `${D.orange}30` },
+  badgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: D.green },
   badgeDotOrange: { backgroundColor: D.orange },
-  badgeText: {
-    fontSize: 10, fontWeight: '800',
-    color: D.green, letterSpacing: 1.4,
-  },
+  badgeText: { fontSize: 10, fontWeight: '800', color: D.green, letterSpacing: 1.4 },
   badgeTextOrange: { color: D.orange },
-  title: {
-    fontSize: 26, fontWeight: '900',
-    color: D.black, letterSpacing: -0.5,
-    textAlign: 'center', lineHeight: 34,
-  },
-  detailCard: {
-    width: '100%',
-    backgroundColor: D.gray50,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: D.gray200,
-    gap: 12,
-  },
-  detailRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-  },
-  detailIconBox: {
-    width: 36, height: 36, borderRadius: 9,
-    backgroundColor: D.orangeDim,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  detailLabel: {
-    fontSize: 9, fontWeight: '800',
-    color: D.gray400, letterSpacing: 1.2,
-  },
-  detailValue: {
-    fontSize: 14, fontWeight: '700',
-    color: D.black, marginTop: 2,
-  },
-  detailSep: {
-    height: 1, backgroundColor: D.gray200,
-  },
-  btn: {
-    width: '100%', height: 56,
-    borderRadius: 14,
-    backgroundColor: D.orange,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: D.orangeDark,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3, shadowRadius: 12,
-    elevation: 6,
-  },
-  btnText: {
-    fontSize: 16, fontWeight: '800',
-    color: D.white, letterSpacing: 0.2,
-  },
+  title: { fontSize: 26, fontWeight: '900', color: D.black, letterSpacing: -0.5, textAlign: 'center', lineHeight: 34 },
+  detailCard: { width: '100%', backgroundColor: D.gray50, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: D.gray200, gap: 12 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  detailIconBox: { width: 36, height: 36, borderRadius: 9, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
+  detailLabel: { fontSize: 9, fontWeight: '800', color: D.gray400, letterSpacing: 1.2 },
+  detailValue: { fontSize: 14, fontWeight: '700', color: D.black, marginTop: 2 },
+  detailSep: { height: 1, backgroundColor: D.gray200 },
+  btn: { width: '100%', height: 56, borderRadius: 14, backgroundColor: D.orange, alignItems: 'center', justifyContent: 'center', shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6 },
+  btnText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
 });
 
-// ─── Hook: polling para quem recebeu a ferramenta ──────────────────────────────
+// ─── Hook: polling para quem recebeu a ferramenta ─────────────────────────────
 function useTrocaRecebidaListener() {
-  const [trocaRecebida, setTrocaRecebida] = useState<{
-    ferramenta: string;
-    deNome: string;
-  } | null>(null);
+  const [trocaRecebida, setTrocaRecebida] = useState<{ ferramenta: string; deNome: string } | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const intervaloRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const buscandoRef  = useRef(false);
@@ -494,10 +392,8 @@ function useTrocaRecebidaListener() {
 
 // ─── Swap Modal ────────────────────────────────────────────────────────────────
 function SwapModal({ visible, tool, onClose, onSuccess }: {
-  visible: boolean;
-  tool: Ferramenta | null;
-  onClose: () => void;
-  onSuccess: (codigo: string, paraNome: string) => void;
+  visible: boolean; tool: Ferramenta | null;
+  onClose: () => void; onSuccess: (codigo: string, paraNome: string) => void;
 }) {
   const [cracha, setCracha] = useState('');
   const [obs, setObs] = useState('');
@@ -515,8 +411,7 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
         Animated.timing(bgOp, { toValue: 1, duration: 280, useNativeDriver: true }),
       ]).start();
     } else {
-      slideY.setValue(400);
-      bgOp.setValue(0);
+      slideY.setValue(400); bgOp.setValue(0);
     }
   }, [visible]);
 
@@ -557,15 +452,10 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
       <Animated.View style={[ms.backdrop, { opacity: bgOp }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={close} />
       </Animated.View>
-
       <Animated.View style={[ms.sheet, { transform: [{ translateY: slideY }] }]}>
         <View style={ms.handle} />
-
-        {/* Tool header */}
         <View style={ms.toolRow}>
-          <View style={ms.toolIconBox}>
-            <WrenchIcon size={20} color={D.orange} />
-          </View>
+          <View style={ms.toolIconBox}><WrenchIcon size={20} color={D.orange} /></View>
           <View style={{ flex: 1 }}>
             <Text style={ms.toolName} numberOfLines={1}>{tool.nome}</Text>
             <Text style={ms.toolMeta}>{tool.categoria} · {tool.codigo}</Text>
@@ -574,16 +464,11 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
             <XIcon size={14} />
           </TouchableOpacity>
         </View>
-
         <View style={ms.sep} />
-
         <View style={ms.body}>
           <NFCPulse active={true} />
-
           <Text style={ms.title}>Transferir Ferramenta</Text>
           <Text style={ms.sub}>Insira o crachá do colaborador{'\n'}que receberá esta ferramenta</Text>
-
-          {/* Crachá input */}
           <View style={ms.inputWrap}>
             <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
               <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
@@ -600,7 +485,6 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
               autoCorrect={false}
             />
           </View>
-
           <View style={[ms.inputWrap, { height: 52 }]}>
             <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
               <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke={D.gray300} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
@@ -614,7 +498,6 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
               autoCapitalize="sentences"
             />
           </View>
-
           <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }] }}>
             <TouchableOpacity
               style={[ms.confirmBtn, !canSubmit && ms.confirmBtnDisabled]}
@@ -640,12 +523,7 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
 }
 const ms = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(26,21,16,0.5)' },
-  sheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: D.white, borderTopLeftRadius: 30, borderTopRightRadius: 30,
-    paddingBottom: Platform.OS === 'ios' ? 50 : 36,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 20,
-  },
+  sheet: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: D.white, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingBottom: Platform.OS === 'ios' ? 50 : 36, shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 20 },
   handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: D.gray200, alignSelf: 'center', marginTop: 12, marginBottom: 6 },
   toolRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingVertical: 14 },
   toolIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
@@ -656,25 +534,15 @@ const ms = StyleSheet.create({
   body: { paddingHorizontal: 24, paddingTop: 24, alignItems: 'center', gap: 14 },
   title: { fontSize: 22, fontWeight: '900', color: D.black, letterSpacing: -0.3, textAlign: 'center' },
   sub: { fontSize: 14, color: D.gray500, textAlign: 'center', lineHeight: 22, marginBottom: 4 },
-  inputWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    width: '100%', height: 56, borderRadius: 14,
-    borderWidth: 1.5, borderColor: D.gray200,
-    backgroundColor: D.gray50, paddingHorizontal: 16,
-  },
+  inputWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%', height: 56, borderRadius: 14, borderWidth: 1.5, borderColor: D.gray200, backgroundColor: D.gray50, paddingHorizontal: 16 },
   input: { flex: 1, fontSize: 15, color: D.black, fontWeight: '500' },
-  confirmBtn: {
-    width: '100%', height: 58, borderRadius: 16, backgroundColor: D.orange,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6,
-    marginTop: 4,
-  },
+  confirmBtn: { width: '100%', height: 58, borderRadius: 16, backgroundColor: D.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6, marginTop: 4 },
   confirmBtnDisabled: { backgroundColor: D.gray200, shadowOpacity: 0 },
   confirmText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
   confirmTextDisabled: { color: D.gray400 },
 });
 
-// ─── Filter Chip ───────────────────────────────────────────────────────────────
+// ─── Filter Chips ──────────────────────────────────────────────────────────────
 const FILTERS: Array<ToolStatus | 'Todos'> = ['Todos', 'Disponível', 'Em uso', 'Em manutenção'];
 
 function FilterChips({ active, onSelect, counts }: { active: string; onSelect: (v: string) => void; counts: Record<string, number> }) {
@@ -706,12 +574,23 @@ const fc = StyleSheet.create({
   countNumOn: { color: D.white },
 });
 
-// ─── Tool Card ──────────────────────────────────────────────────────────────────
-function ToolCard({ item, index, onPress }: { item: Ferramenta; index: number; onPress: (f: Ferramenta) => void }) {
+// ─── Tool Card ─────────────────────────────────────────────────────────────────
+/**
+ * canTransfer: boolean — passa `true` só para colaboradores.
+ * Almoxarife vê o mesmo card mas sem o accent vermelho e sem o hint de "toque p/ transferir".
+ */
+function ToolCard({ item, index, onPress, canTransfer }: {
+  item: Ferramenta; index: number;
+  onPress: (f: Ferramenta) => void;
+  canTransfer: boolean;
+}) {
   const oy = useRef(new Animated.Value(16)).current;
   const op = useRef(new Animated.Value(0)).current;
   const sc = useRef(new Animated.Value(1)).current;
+
+  // Ferramenta "Em uso" só é interativa se o usuário pode transferir
   const isInUse = item.status === 'Em uso';
+  const isInteractive = isInUse && canTransfer;
 
   useEffect(() => {
     Animated.parallel([
@@ -721,7 +600,7 @@ function ToolCard({ item, index, onPress }: { item: Ferramenta; index: number; o
   }, []);
 
   const press = () => {
-    if (!isInUse) return;
+    if (!isInteractive) return;
     Animated.sequence([
       Animated.timing(sc, { toValue: 0.978, duration: 65, useNativeDriver: true }),
       Animated.spring(sc, { toValue: 1, tension: 280, friction: 10, useNativeDriver: true }),
@@ -731,8 +610,13 @@ function ToolCard({ item, index, onPress }: { item: Ferramenta; index: number; o
 
   return (
     <Animated.View style={[tc.outer, { opacity: op, transform: [{ translateY: oy }, { scale: sc }] }]}>
-      <TouchableOpacity style={[tc.card, isInUse && tc.cardInteractive]} onPress={press} activeOpacity={1}>
-        {isInUse && <View style={tc.accent} />}
+      <TouchableOpacity
+        style={[tc.card, isInteractive && tc.cardInteractive]}
+        onPress={press}
+        activeOpacity={isInteractive ? 0.92 : 1}
+      >
+        {/* Accent bar vermelho só para colaborador com ferramenta em uso */}
+        {isInteractive && <View style={tc.accent} />}
 
         <View style={[tc.iconBox, isInUse && tc.iconBoxRed]}>
           <WrenchIcon size={18} color={isInUse ? D.red : D.orange} />
@@ -748,29 +632,38 @@ function ToolCard({ item, index, onPress }: { item: Ferramenta; index: number; o
             <View style={tc.sep} />
             <Text style={tc.cat}>{item.categoria}</Text>
           </View>
-          {isInUse && item.alocadoPara && (
+
+          {/* Linha de alocação + hint de troca — só colaborador */}
+          {isInUse && item.alocadoPara && canTransfer && (
             <View style={tc.allocRow}>
               <UserIcon size={11} color={D.red} />
               <Text style={tc.allocText}>{item.alocadoPara}</Text>
               <Text style={tc.tapHint}>Toque para transferir →</Text>
             </View>
           )}
+
+          {/* Linha de alocação sem hint — almoxarife (read-only) */}
+          {isInUse && item.alocadoPara && !canTransfer && (
+            <View style={tc.allocRow}>
+              <UserIcon size={11} color={D.red} />
+              <Text style={tc.allocText}>{item.alocadoPara}</Text>
+              <View style={tc.readOnlyBadge}>
+                <EyeIcon size={9} color={D.gray500} />
+                <Text style={tc.readOnlyText}>somente leitura</Text>
+              </View>
+            </View>
+          )}
         </View>
 
-        {isInUse && <ChevronIcon color={D.red + '60'} />}
+        {/* Seta de ação só para colaborador interativo */}
+        {isInteractive && <ChevronIcon color={D.red + '60'} />}
       </TouchableOpacity>
     </Animated.View>
   );
 }
 const tc = StyleSheet.create({
   outer: { marginBottom: 8 },
-  card: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: D.white, borderRadius: 16,
-    paddingVertical: 14, paddingHorizontal: 14,
-    borderWidth: 1, borderColor: D.gray200,
-    overflow: 'hidden',
-  },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: D.white, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 14, borderWidth: 1, borderColor: D.gray200, overflow: 'hidden' },
   cardInteractive: { borderColor: `${D.red}25`, borderWidth: 1.5 },
   accent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: D.red },
   iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
@@ -785,6 +678,9 @@ const tc = StyleSheet.create({
   allocRow: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: D.redBg, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 7, alignSelf: 'flex-start' },
   allocText: { fontSize: 11, fontWeight: '700', color: D.red },
   tapHint: { fontSize: 10, color: `${D.red}70`, fontStyle: 'italic' },
+  // Badge read-only para almoxarife
+  readOnlyBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: D.gray100, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  readOnlyText: { fontSize: 9, color: D.gray500, fontWeight: '600', fontStyle: 'italic' },
 });
 
 // ─── Header Stats ──────────────────────────────────────────────────────────────
@@ -805,6 +701,10 @@ const stb = StyleSheet.create({
 
 // ─── Main Screen ───────────────────────────────────────────────────────────────
 export default function FerramentasScreen() {
+  // ── Role — decide se o botão de troca aparece ─────────────────────────────
+  const { user } = useAuth();
+  const canTransfer = user?.role === 'colaborador';
+
   const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string>('Todos');
@@ -813,14 +713,12 @@ export default function FerramentasScreen() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ visible: false, msg: '' });
 
-  // Modal de confirmação — quem enviou
   const [trocaEnviada, setTrocaEnviada] = useState<{ ferramenta: string; paraNome: string } | null>(null);
   const [successModalVisible, setSuccessModalVisible] = useState(false);
 
-  // Polling — quem recebeu
+  // Polling de troca recebida — válido para colaborador (almoxarife não recebe P2P)
   const { trocaRecebida, modalVisible: recebidaVisible, fechar: fecharRecebida } = useTrocaRecebidaListener();
 
-  // Header anims
   const headerAnim = useRef(new Animated.Value(0)).current;
   const statAnim1 = useRef(new Animated.Value(0)).current;
   const statAnim2 = useRef(new Animated.Value(0)).current;
@@ -871,6 +769,13 @@ export default function FerramentasScreen() {
     setTimeout(() => setToast({ visible: false, msg: '' }), 3200);
   };
 
+  const handleCardPress = (t: Ferramenta) => {
+    // Guard: só colaborador pode abrir modal de troca
+    if (!canTransfer) return;
+    setSelected(t);
+    setModalVisible(true);
+  };
+
   const headerTY = headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] });
 
   return (
@@ -884,12 +789,13 @@ export default function FerramentasScreen() {
             <View key={i} style={s.dot} />
           ))}
         </View>
-
         <Animated.View style={[s.header, { opacity: headerAnim, transform: [{ translateY: headerTY }] }]}>
           <View style={s.headerTop}>
             <View>
               <Text style={s.headerTitle}>Ferramentas</Text>
-              <Text style={s.headerSub}>{counts.Todos} itens registrados</Text>
+              <Text style={s.headerSub}>
+                {counts.Todos} itens · {canTransfer ? 'toque em "Em uso" para transferir' : 'visão gerencial'}
+              </Text>
             </View>
             <TouchableOpacity onPress={load} style={s.refreshBtn} activeOpacity={0.7}>
               <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -898,7 +804,6 @@ export default function FerramentasScreen() {
               </Svg>
             </TouchableOpacity>
           </View>
-
           <View style={s.statsBar}>
             <StatBox value={counts['Disponível']} label="Disponíveis" anim={statAnim1} />
             <View style={s.statsDivider} />
@@ -943,7 +848,12 @@ export default function FerramentasScreen() {
             data={filtered}
             keyExtractor={f => f.codigo}
             renderItem={({ item, index }) => (
-              <ToolCard item={item} index={index} onPress={t => { setSelected(t); setModalVisible(true); }} />
+              <ToolCard
+                item={item}
+                index={index}
+                onPress={handleCardPress}
+                canTransfer={canTransfer}
+              />
             )}
             contentContainerStyle={s.listContent}
             showsVerticalScrollIndicator={false}
@@ -958,35 +868,41 @@ export default function FerramentasScreen() {
         )}
       </View>
 
-      {/* Modal de transferência */}
-      <SwapModal
-        visible={modalVisible}
-        tool={selected}
-        onClose={() => { setModalVisible(false); setTimeout(() => setSelected(null), 400); }}
-        onSuccess={(ferramenta, paraNome) => {
-          setTrocaEnviada({ ferramenta, paraNome });
-          setSuccessModalVisible(true);
-          setTimeout(load, 900);
-        }}
-      />
+      {/* Modal de transferência — só renderiza para colaborador */}
+      {canTransfer && (
+        <SwapModal
+          visible={modalVisible}
+          tool={selected}
+          onClose={() => { setModalVisible(false); setTimeout(() => setSelected(null), 400); }}
+          onSuccess={(ferramenta, paraNome) => {
+            setTrocaEnviada({ ferramenta, paraNome });
+            setSuccessModalVisible(true);
+            setTimeout(load, 900);
+          }}
+        />
+      )}
 
-      {/* Confirmação — quem ENVIOU */}
-      <TrocaSuccessModal
-        visible={successModalVisible}
-        ferramenta={trocaEnviada?.ferramenta ?? ''}
-        outroNome={trocaEnviada?.paraNome ?? ''}
-        tipo="enviou"
-        onClose={() => { setSuccessModalVisible(false); setTrocaEnviada(null); }}
-      />
+      {/* Confirmação — quem ENVIOU (colaborador) */}
+      {canTransfer && (
+        <TrocaSuccessModal
+          visible={successModalVisible}
+          ferramenta={trocaEnviada?.ferramenta ?? ''}
+          outroNome={trocaEnviada?.paraNome ?? ''}
+          tipo="enviou"
+          onClose={() => { setSuccessModalVisible(false); setTrocaEnviada(null); }}
+        />
+      )}
 
-      {/* Confirmação — quem RECEBEU (via polling) */}
-      <TrocaSuccessModal
-        visible={recebidaVisible}
-        ferramenta={trocaRecebida?.ferramenta ?? ''}
-        outroNome={trocaRecebida?.deNome ?? ''}
-        tipo="recebeu"
-        onClose={fecharRecebida}
-      />
+      {/* Confirmação — quem RECEBEU via polling (colaborador) */}
+      {canTransfer && (
+        <TrocaSuccessModal
+          visible={recebidaVisible}
+          ferramenta={trocaRecebida?.ferramenta ?? ''}
+          outroNome={trocaRecebida?.deNome ?? ''}
+          tipo="recebeu"
+          onClose={fecharRecebida}
+        />
+      )}
 
       <Toast message={toast.msg} visible={toast.visible} />
     </View>
@@ -997,10 +913,7 @@ export default function FerramentasScreen() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: D.orange },
   headerZone: { backgroundColor: D.orange, overflow: 'hidden' },
-  dotGrid: {
-    position: 'absolute', right: 20, top: 20,
-    flexDirection: 'row', flexWrap: 'wrap', width: 72, gap: 8, opacity: 0.18,
-  },
+  dotGrid: { position: 'absolute', right: 20, top: 20, flexDirection: 'row', flexWrap: 'wrap', width: 72, gap: 8, opacity: 0.18 },
   dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: D.white },
   header: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 28 },
   headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
@@ -1011,12 +924,7 @@ const s = StyleSheet.create({
   statsDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.15)' },
   body: { flex: 1, backgroundColor: D.offWhite, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingTop: 18, overflow: 'hidden' },
   searchRow: { paddingHorizontal: 18 },
-  searchBox: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: D.white, borderRadius: 14,
-    paddingHorizontal: 16, height: 50,
-    borderWidth: 1, borderColor: D.gray200,
-  },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: D.white, borderRadius: 14, paddingHorizontal: 16, height: 50, borderWidth: 1, borderColor: D.gray200 },
   searchInput: { flex: 1, fontSize: 14, color: D.black, fontWeight: '500' },
   listContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 28 },
   loadState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },

@@ -1,11 +1,20 @@
 /**
- * app/(tabs)/almoxarifado.tsx — Marilan v5 · Sistema de Gestão Inteligente
+ * app/(tabs)/almoxarifado.tsx — Marilan v6.0
  *
- * ALTERAÇÕES v5.1:
- *   Modal de Liberação Manual agora exige dois campos:
- *     - ID do Colaborador (quem retira)
- *     - ID do Crachá (Almoxarife) (quem autoriza)
- *   Após envio exibe tela de status: "Aguardando confirmação no terminal..."
+ * RBAC v6 — Inversão de papéis:
+ *
+ *   COLABORADOR  → Vê catálogo, monta lote, envia solicitação de retirada.
+ *                  Não tem acesso a dashboards gerenciais.
+ *
+ *   ALMOXARIFE   → Vê Dashboard de Pendências + histórico de custódia.
+ *                  NÃO pode montar lote nem solicitar ferramentas para si.
+ *                  Aprovações chegam via SolicitacaoModal (polling existente).
+ *
+ * Implementação:
+ *   • useAuth() lido no topo da tela — fonte única de verdade do role.
+ *   • <ColaboradorView> renderiza catálogo + lote + botão solicitar.
+ *   • <AlmoxarifeView> renderiza dashboard de quem está com o quê.
+ *   • Guard no handleLibSuccess bloqueia almoxarife mesmo via bypass direto.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -33,6 +42,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { apiClient } from '../../services/api';
+import { useAuth } from '@/hooks/useAuth';
 import { useSolicitacoesListener } from '../../hooks/useSolicitacoesListener';
 import { SolicitacaoModal } from '../../components/SolicitacaoModal';
 
@@ -107,7 +117,6 @@ interface AuditLog {
 
 type LibMode = 'nfc' | 'manual';
 type NFCPhase = 'waiting' | 'simulated_connected' | 'confirming' | 'submitting' | 'done' | 'error';
-// Nova fase para o fluxo manual
 type ManualPhase = 'form' | 'submitting' | 'awaiting' | 'done' | 'error';
 
 function formatElapsed(ms: number): string {
@@ -151,7 +160,7 @@ async function saveCustodyTimestamps(ts: Record<string, number>): Promise<void> 
   } catch {}
 }
 
-// ─── Icons ─────────────────────────────────────────────────────────────────────
+// ─── Icons ────────────────────────────────────────────────────────────────────
 const WrenchIcon = ({ size = 18, color = D.orange }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
@@ -243,7 +252,6 @@ const TimerIcon = ({ size = 12, color = D.amber }: { size?: number; color?: stri
   </Svg>
 );
 
-// ─── Novo: Ícone Usuário Colaborador ──────────────────────────────────────────
 const UserColaboradorIcon = ({ size = 16, color = D.orange }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Circle cx={12} cy={8} r={4} stroke={color} strokeWidth={1.7} />
@@ -251,7 +259,6 @@ const UserColaboradorIcon = ({ size = 16, color = D.orange }: { size?: number; c
   </Svg>
 );
 
-// ─── Novo: Ícone Chave/Almoxarife ─────────────────────────────────────────────
 const KeyAlmoxarifeIcon = ({ size = 16, color = D.orange }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Circle cx={8} cy={11} r={5} stroke={color} strokeWidth={1.7} />
@@ -260,7 +267,6 @@ const KeyAlmoxarifeIcon = ({ size = 16, color = D.orange }: { size?: number; col
   </Svg>
 );
 
-// ─── Novo: Ícone Relógio Aguardando ───────────────────────────────────────────
 const AwaitingIcon = ({ size = 48, color = D.orange }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.6} />
@@ -269,7 +275,26 @@ const AwaitingIcon = ({ size = 48, color = D.orange }: { size?: number; color?: 
   </Svg>
 );
 
-// ─── Radar Pulse ───────────────────────────────────────────────────────────────
+// ─── Ícone de Dashboard (Almoxarife) ─────────────────────────────────────────
+const DashboardIcon = ({ size = 18, color = D.orange }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x={3} y={3} width={7} height={7} rx={1} stroke={color} strokeWidth={1.7} />
+    <Rect x={14} y={3} width={7} height={7} rx={1} stroke={color} strokeWidth={1.7} />
+    <Rect x={3} y={14} width={7} height={7} rx={1} stroke={color} strokeWidth={1.7} />
+    <Rect x={14} y={14} width={7} height={7} rx={1} stroke={color} strokeWidth={1.7} />
+  </Svg>
+);
+
+// ─── Ícone de Bloqueio ────────────────────────────────────────────────────────
+const LockIcon = ({ size = 16, color = D.slate }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x={3} y={11} width={18} height={11} rx={2} stroke={color} strokeWidth={1.7} />
+    <Path d="M7 11V7a5 5 0 0 1 10 0v4" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+    <Circle cx={12} cy={16} r={1.5} fill={color} />
+  </Svg>
+);
+
+// ─── Radar Pulse ──────────────────────────────────────────────────────────────
 function RadarPulse({ active, phase }: { active: boolean; phase: NFCPhase }) {
   const rings = [
     useRef(new Animated.Value(0)).current,
@@ -347,7 +372,7 @@ const rp = StyleSheet.create({
   core: { width: 90, height: 90, borderRadius: 45, backgroundColor: `${D.orange}15`, borderWidth: 2, borderColor: `${D.orange}40`, alignItems: 'center', justifyContent: 'center' },
 });
 
-// ─── Toast ─────────────────────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────────
 function Toast({ message, visible, type = 'success' }: { message: string; visible: boolean; type?: 'success' | 'error' | 'info' }) {
   const y = useRef(new Animated.Value(24)).current;
   const op = useRef(new Animated.Value(0)).current;
@@ -389,7 +414,7 @@ const toast = StyleSheet.create({
   text: { fontSize: 14, fontWeight: '600', color: D.white, flex: 1, letterSpacing: 0.1 },
 });
 
-// ─── Status Badge ──────────────────────────────────────────────────────────────
+// ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: FerStatus }) {
   const cfg = {
     'Disponível': { dot: D.greenLight, bg: D.greenBg, text: D.greenText },
@@ -511,9 +536,6 @@ function AuditLogModal({ visible, onClose }: { visible: boolean; onClose: () => 
             <XIcon size={14} color={D.slate} />
           </TouchableOpacity>
         </View>
-        <View style={alm.infoBar}>
-          <Text style={alm.infoText}>💡 Logs salvos localmente. Em produção, sincronizar com POST /logs para auditoria centralizada.</Text>
-        </View>
         {loading ? (
           <View style={alm.loadState}>
             <ActivityIndicator color={D.orange} />
@@ -568,8 +590,6 @@ const alm = StyleSheet.create({
   title: { fontSize: 16, fontWeight: '800', color: D.obsidian },
   sub: { fontSize: 11, color: D.slate, marginTop: 1 },
   closeBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: D.mist, alignItems: 'center', justifyContent: 'center' },
-  infoBar: { marginHorizontal: 20, marginTop: 12, marginBottom: 8, backgroundColor: D.blueBg, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: `${D.blue}20` },
-  infoText: { fontSize: 11, color: D.blue, lineHeight: 16 },
   loadState: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 40, gap: 12 },
   loadText: { fontSize: 14, color: D.slate },
   emptyState: { alignItems: 'center', paddingVertical: 50, gap: 8 },
@@ -590,6 +610,7 @@ const alm = StyleSheet.create({
   boldText: { fontWeight: '700', color: D.obsidian },
 });
 
+// ─── ShiftStatusCard (Almoxarife) ─────────────────────────────────────────────
 function ShiftStatusCard({ emUso, disponiveis, noLote, atrasos, onOpenLogs, headerAnim }: {
   emUso: number; disponiveis: number; noLote: number; atrasos: number;
   onOpenLogs: () => void; headerAnim: Animated.Value;
@@ -618,12 +639,6 @@ function ShiftStatusCard({ emUso, disponiveis, noLote, atrasos, onOpenLogs, head
           <View style={[ssc.metricDot, { backgroundColor: D.greenLight }]} />
           <Text style={ssc.metricVal}>{disponiveis}</Text>
           <Text style={ssc.metricLbl}>Disponíveis</Text>
-        </View>
-        <View style={ssc.divider} />
-        <View style={ssc.metric}>
-          <View style={[ssc.metricDot, { backgroundColor: D.orange }]} />
-          <Text style={[ssc.metricVal, noLote > 0 && { color: D.orange }]}>{noLote}</Text>
-          <Text style={ssc.metricLbl}>No lote</Text>
         </View>
         <View style={ssc.divider} />
         <View style={ssc.metric}>
@@ -659,6 +674,7 @@ const ssc = StyleSheet.create({
   alertText: { fontSize: 11, color: D.white, fontWeight: '600', flex: 1 },
 });
 
+// ─── MyToolsSection (Colaborador) ─────────────────────────────────────────────
 function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver: () => void }) {
   const [expanded, setExpanded] = useState(true);
   if (items.length === 0) return null;
@@ -870,7 +886,7 @@ function LoteFooter({ count, onSolicitar, anim }: { count: number; onSolicitar: 
         <View style={lf.leftSection}>
           <NFCChipIcon size={22} color={D.white} />
           <View>
-            <Text style={lf.label}>Solicitar Liberação em Lote</Text>
+            <Text style={lf.label}>Solicitar Retirada</Text>
             <Text style={lf.sub}>{count} {count === 1 ? 'ferramenta selecionada' : 'ferramentas selecionadas'}</Text>
           </View>
         </View>
@@ -889,20 +905,7 @@ const lf = StyleSheet.create({
   arrowBox: { width: 36, height: 36, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
 });
 
-// ════════════════════════════════════════════════════════════════════════════════
-// ─── MODAL DE LIBERAÇÃO (ATUALIZADO v5.1) ─────────────────────────────────────
-// ════════════════════════════════════════════════════════════════════════════════
-interface LibModalProps {
-  visible: boolean;
-  lote: LoteItem[];
-  onClose: () => void;
-  onSuccess: (crachaColaborador: string, metodo: 'NFC' | 'MANUAL') => Promise<void>;
-}
-
-/**
- * Tela pulsante de "Aguardando Confirmação" — exibida após envio manual.
- * Pulsa suavemente para indicar estado de espera ativa.
- */
+// ─── AWAITING CONFIRMATION SCREEN ────────────────────────────────────────────
 function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClose: () => void }) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const dotAnim1 = useRef(new Animated.Value(0)).current;
@@ -912,13 +915,11 @@ function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClo
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Entrada
     Animated.parallel([
       Animated.spring(slideIn, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
       Animated.timing(opacity, { toValue: 1, duration: 350, useNativeDriver: true }),
     ]).start();
 
-    // Pulso do ícone
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
@@ -926,7 +927,6 @@ function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClo
       ])
     ).start();
 
-    // Dots de loading animados
     const dotLoop = (anim: Animated.Value, delay: number) =>
       Animated.loop(
         Animated.sequence([
@@ -945,27 +945,20 @@ function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClo
 
   return (
     <Animated.View style={[aw.container, { opacity, transform: [{ translateY: slideIn }] }]}>
-      {/* Ícone pulsante */}
       <Animated.View style={[aw.iconRing, { transform: [{ scale: pulseAnim }] }]}>
         <View style={aw.iconRingInner}>
           <AwaitingIcon size={44} color={D.orange} />
         </View>
       </Animated.View>
-
-      {/* Título e mensagem */}
       <View style={aw.textBlock}>
         <Text style={aw.title}>Solicitação Enviada!</Text>
-        <Text style={aw.subtitle}>Aguardando confirmação no{'\n'}terminal do Almoxarife</Text>
+        <Text style={aw.subtitle}>Aguardando aprovação do{'\n'}Almoxarife</Text>
       </View>
-
-      {/* Dots de loading */}
       <View style={aw.dotsRow}>
         {[dotAnim1, dotAnim2, dotAnim3].map((d, i) => (
           <Animated.View key={i} style={[aw.dot, { opacity: d }]} />
         ))}
       </View>
-
-      {/* Resumo do lote */}
       <View style={aw.loteCard}>
         <Text style={aw.loteCardTitle}>ITENS DA SOLICITAÇÃO</Text>
         {lote.map(item => (
@@ -984,16 +977,12 @@ function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClo
           <Text style={aw.loteTotalQty}>{totalQty}</Text>
         </View>
       </View>
-
-      {/* Instrução */}
       <View style={aw.instructionBar}>
         <View style={aw.instructionDot} />
         <Text style={aw.instructionText}>
           O Almoxarife receberá a notificação e deverá confirmar no terminal. Mantenha o app aberto.
         </Text>
       </View>
-
-      {/* Botão fechar */}
       <TouchableOpacity style={aw.closeBtn} onPress={onClose} activeOpacity={0.85}>
         <Text style={aw.closeBtnText}>Fechar e Aguardar</Text>
         <ArrowIcon size={15} color={D.white} />
@@ -1003,91 +992,19 @@ function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClo
 }
 
 const aw = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    gap: 20,
-  },
-  iconRing: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    backgroundColor: `${D.orange}12`,
-    borderWidth: 1.5,
-    borderColor: D.orangeLine,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconRingInner: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
-    backgroundColor: `${D.orange}20`,
-    borderWidth: 1,
-    borderColor: `${D.orange}35`,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 20 },
+  iconRing: { width: 110, height: 110, borderRadius: 55, backgroundColor: `${D.orange}12`, borderWidth: 1.5, borderColor: D.orangeLine, alignItems: 'center', justifyContent: 'center' },
+  iconRingInner: { width: 82, height: 82, borderRadius: 41, backgroundColor: `${D.orange}20`, borderWidth: 1, borderColor: `${D.orange}35`, alignItems: 'center', justifyContent: 'center' },
   textBlock: { alignItems: 'center', gap: 8 },
-  title: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: D.white,
-    letterSpacing: -0.3,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.50)',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  dotsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-    marginTop: -8,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: D.orange,
-  },
-  loteCard: {
-    width: '100%',
-    backgroundColor: D.nfcSurface,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: D.nfcBorder,
-    gap: 10,
-  },
-  loteCardTitle: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: D.orange,
-    letterSpacing: 1.8,
-    marginBottom: 2,
-  },
-  loteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
+  title: { fontSize: 22, fontWeight: '900', color: D.white, letterSpacing: -0.3, textAlign: 'center' },
+  subtitle: { fontSize: 14, color: 'rgba(255,255,255,0.50)', textAlign: 'center', lineHeight: 22 },
+  dotsRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: -8 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: D.orange },
+  loteCard: { width: '100%', backgroundColor: D.nfcSurface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: D.nfcBorder, gap: 10 },
+  loteCardTitle: { fontSize: 9, fontWeight: '800', color: D.orange, letterSpacing: 1.8, marginBottom: 2 },
+  loteRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   loteDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: D.orange },
-  loteCode: {
-    fontSize: 10,
-    color: D.orange,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontWeight: '600',
-    minWidth: 68,
-  },
+  loteCode: { fontSize: 10, color: D.orange, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontWeight: '600', minWidth: 68 },
   loteName: { flex: 1, fontSize: 12, color: 'rgba(255,255,255,0.70)', fontWeight: '500' },
   loteQtyBadge: { backgroundColor: D.orangeSoft, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
   loteQty: { fontSize: 10, fontWeight: '800', color: D.orange },
@@ -1095,64 +1012,30 @@ const aw = StyleSheet.create({
   loteTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   loteTotalLabel: { fontSize: 11, color: 'rgba(255,255,255,0.40)', fontWeight: '600' },
   loteTotalQty: { fontSize: 14, fontWeight: '900', color: D.orange },
-  instructionBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    backgroundColor: `${D.orange}10`,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: D.orangeLine,
-    width: '100%',
-  },
-  instructionDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: D.orange,
-    marginTop: 4,
-    flexShrink: 0,
-  },
-  instructionText: {
-    flex: 1,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.50)',
-    lineHeight: 18,
-    fontWeight: '500',
-  },
-  closeBtn: {
-    width: '100%',
-    height: 54,
-    borderRadius: 14,
-    backgroundColor: D.orange,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    shadowColor: D.orangeDark,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    elevation: 8,
-  },
+  instructionBar: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: `${D.orange}10`, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: D.orangeLine, width: '100%' },
+  instructionDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: D.orange, marginTop: 4, flexShrink: 0 },
+  instructionText: { flex: 1, fontSize: 12, color: 'rgba(255,255,255,0.50)', lineHeight: 18, fontWeight: '500' },
+  closeBtn: { width: '100%', height: 54, borderRadius: 14, backgroundColor: D.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 8 },
   closeBtnText: { fontSize: 15, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
 });
 
-// ─── COMPONENTE PRINCIPAL DO MODAL ────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// ─── MODAL DE LIBERAÇÃO (Colaborador envia solicitação) ──────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+interface LibModalProps {
+  visible: boolean;
+  lote: LoteItem[];
+  onClose: () => void;
+  onSuccess: (crachaColaborador: string, metodo: 'NFC' | 'MANUAL') => Promise<void>;
+}
+
 function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
   const [mode, setMode] = useState<LibMode>('nfc');
   const [nfcPhase, setNfcPhase] = useState<NFCPhase>('waiting');
-
-  // ── Campos do fluxo manual ──────────────────────────────────────────────────
   const [crachaColaborador, setCrachaColaborador] = useState('');
-  const [crachaAlmoxarife, setCrachaAlmoxarife] = useState('');
   const [manualPhase, setManualPhase] = useState<ManualPhase>('form');
   const [manualError, setManualError] = useState('');
-
-  // Foco nos inputs para estilo laranja
-  const [focusedField, setFocusedField] = useState<'colaborador' | 'almoxarife' | null>(null);
-
+  const [focusedField, setFocusedField] = useState<'colaborador' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(3);
   const bgOpacity = useRef(new Animated.Value(0)).current;
@@ -1167,7 +1050,6 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
       setMode('nfc');
       setNfcPhase('waiting');
       setCrachaColaborador('');
-      setCrachaAlmoxarife('');
       setManualPhase('form');
       setManualError('');
       setFocusedField(null);
@@ -1219,30 +1101,20 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
     } catch { setNfcPhase('error'); }
   };
 
-  // ── Submissão Manual com dois campos ─────────────────────────────────────────
+  // ── Fluxo Manual: Colaborador informa apenas seu próprio crachá ───────────
   const handleManualSubmit = async () => {
-    // Validação dos dois campos
     if (!crachaColaborador.trim()) {
-      setManualError('Informe o ID do Colaborador');
+      setManualError('Informe o seu ID de Colaborador');
       return;
     }
-    if (!crachaAlmoxarife.trim()) {
-      setManualError('Informe o ID do Crachá do Almoxarife');
-      return;
-    }
-
     try {
       setSubmitting(true);
       setManualPhase('submitting');
       setManualError('');
-
-      // Chama API com os dois IDs
       await onSuccess(crachaColaborador.trim(), 'MANUAL');
-
-      // Transição para tela de aguardo
       setManualPhase('awaiting');
     } catch (e: any) {
-      setManualError(e.message || 'Erro ao efetuar retirada');
+      setManualError(e.message || 'Erro ao enviar solicitação');
       setManualPhase('form');
     } finally {
       setSubmitting(false);
@@ -1251,23 +1123,17 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
 
   const getNFCText = () => {
     switch (nfcPhase) {
-      case 'waiting': return { title: 'Aguardando NFC', sub: 'Aproxime o celular do dispositivo do Almoxarife', color: D.orange };
-      case 'simulated_connected': return { title: 'Dispositivo Detectado!', sub: 'Sincronizando lote…', color: D.orange };
-      case 'confirming': return { title: 'Confirme a Retirada', sub: 'Verifique os itens antes de confirmar', color: D.orange };
-      case 'submitting': return { title: 'Registrando…', sub: 'Aguarde a confirmação da API', color: D.amber };
-      case 'done': return { title: 'Retirada Registrada!', sub: `Encerrando em ${countdown}s…`, color: D.green };
-      case 'error': return { title: 'Erro na Retirada', sub: 'Verifique a conexão e tente via Manual', color: D.red };
+      case 'waiting': return { title: 'Aguardando NFC', sub: 'Aproxime o celular do leitor do Almoxarife', color: D.orange };
+      case 'simulated_connected': return { title: 'Leitor Detectado!', sub: 'Sincronizando lote…', color: D.orange };
+      case 'confirming': return { title: 'Confirme a Solicitação', sub: 'Verifique os itens antes de enviar', color: D.orange };
+      case 'submitting': return { title: 'Enviando…', sub: 'Aguardando resposta da API', color: D.amber };
+      case 'done': return { title: 'Solicitação Enviada!', sub: `Encerrando em ${countdown}s…`, color: D.green };
+      case 'error': return { title: 'Erro no envio', sub: 'Tente via Identificação Manual', color: D.red };
     }
   };
 
   const txt = getNFCText();
   const totalQty = lote.reduce((a, c) => a + c.qty, 0);
-
-  // Estilo dinâmico do input com foco laranja
-  const inputBorderStyle = (field: 'colaborador' | 'almoxarife') => ({
-    borderColor: focusedField === field ? D.orange : D.nfcBorder,
-    borderWidth: focusedField === field ? 1.8 : 1.5,
-  });
 
   return (
     <Modal transparent visible={visible} animationType="none" statusBarTranslucent onRequestClose={handleClose}>
@@ -1278,9 +1144,8 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
           <View style={nm.header}>
             <View style={nm.headerLeft}>
               <View style={nm.loteTag}>
-                <Text style={nm.loteTagText}>{totalQty} {totalQty === 1 ? 'ITEM' : 'ITENS'} NO LOTE</Text>
+                <Text style={nm.loteTagText}>{totalQty} {totalQty === 1 ? 'ITEM' : 'ITENS'}</Text>
               </View>
-              {/* Só mostra o toggle de modo fora do estado awaiting */}
               {manualPhase !== 'awaiting' && (
                 <TouchableOpacity
                   style={nm.modeToggle}
@@ -1303,7 +1168,7 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
           </View>
         </SafeAreaView>
 
-        {/* ── Fluxo NFC ────────────────────────────────────────────── */}
+        {/* ── Fluxo NFC ── */}
         {mode === 'nfc' && (
           <>
             <View style={nm.radarArea}>
@@ -1315,14 +1180,14 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               {nfcPhase === 'waiting' && (
                 <View style={nm.statusRow}>
                   <View style={[nm.statusDot, { backgroundColor: D.orange }]} />
-                  <Text style={nm.statusLabel}>Transmitindo sinal NFC…</Text>
+                  <Text style={nm.statusLabel}>Aguardando leitura NFC…</Text>
                 </View>
               )}
             </View>
             <View style={nm.contentArea}>
               {(nfcPhase === 'simulated_connected' || nfcPhase === 'confirming') && (
                 <View style={nm.itemsCard}>
-                  <Text style={nm.itemsCardTitle}>ITENS DETECTADOS NO LOTE</Text>
+                  <Text style={nm.itemsCardTitle}>ITENS DO PEDIDO</Text>
                   {lote.map(item => (
                     <View key={item.codigo} style={nm.itemRow}>
                       <View style={nm.itemDot} />
@@ -1343,18 +1208,18 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               {nfcPhase === 'confirming' && (
                 <TouchableOpacity style={nm.acceptBtn} onPress={handleNFCConfirm} activeOpacity={0.87}>
                   <CheckIcon size={20} color={D.white} />
-                  <Text style={nm.acceptBtnText}>Confirmar e Registrar</Text>
+                  <Text style={nm.acceptBtnText}>Confirmar e Enviar Pedido</Text>
                 </TouchableOpacity>
               )}
               {nfcPhase === 'submitting' && (
                 <View style={nm.submittingWrap}>
                   <ActivityIndicator color={D.orange} size="small" />
-                  <Text style={nm.submittingText}>Registrando retirada e salvando log de auditoria…</Text>
+                  <Text style={nm.submittingText}>Enviando solicitação para o Almoxarife…</Text>
                 </View>
               )}
               {nfcPhase === 'error' && (
                 <View style={nm.errorCard}>
-                  <Text style={nm.errorText}>Não foi possível registrar. Tente o fluxo Manual.</Text>
+                  <Text style={nm.errorText}>Falha no envio. Tente pelo modo Manual.</Text>
                   <TouchableOpacity onPress={() => { setMode('manual'); setNfcPhase('waiting'); }} style={nm.errorSwitchBtn}>
                     <Text style={nm.errorSwitchText}>Ir para Manual</Text>
                   </TouchableOpacity>
@@ -1363,8 +1228,8 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               {nfcPhase === 'done' && (
                 <Animated.View style={[nm.doneCard, { transform: [{ scale: successScale }] }]}>
                   <View style={nm.doneIconCircle}><CheckIcon size={32} color={D.green} /></View>
-                  <Text style={nm.doneTitle}>Log Salvo + API Confirmada</Text>
-                  <Text style={nm.doneSub}>{totalQty} {totalQty === 1 ? 'item retirado' : 'itens retirados'} · Auditoria registrada</Text>
+                  <Text style={nm.doneTitle}>Pedido Enviado!</Text>
+                  <Text style={nm.doneSub}>Aguarde a aprovação do Almoxarife</Text>
                   <Animated.Text style={[nm.countdown, { transform: [{ scale: countdownAnim }] }]}>Fechando em {countdown}s</Animated.Text>
                 </Animated.View>
               )}
@@ -1372,22 +1237,22 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
           </>
         )}
 
-        {/* ── Fluxo Manual ─────────────────────────────────────────── */}
+        {/* ── Fluxo Manual — Awaiting ── */}
         {mode === 'manual' && manualPhase === 'awaiting' && (
           <AwaitingConfirmationScreen lote={lote} onClose={handleClose} />
         )}
 
+        {/* ── Fluxo Manual — Formulário (apenas crachá do colaborador) ── */}
         {mode === 'manual' && manualPhase !== 'awaiting' && (
           <KeyboardAvoidingView style={nm.manualContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={nm.manualHeader}>
               <KeyboardIcon size={32} color={D.orange} />
-              <Text style={nm.manualTitle}>Liberação Manual</Text>
-              <Text style={nm.manualSub}>Insira os IDs para registrar na API e salvar o log de auditoria</Text>
+              <Text style={nm.manualTitle}>Identificação Manual</Text>
+              <Text style={nm.manualSub}>Informe seu ID para enviar a solicitação ao Almoxarife</Text>
             </View>
 
-            {/* Resumo do lote */}
             <View style={nm.manualLoteResume}>
-              <Text style={nm.manualLoteLabel}>FERRAMENTAS NO LOTE</Text>
+              <Text style={nm.manualLoteLabel}>FERRAMENTAS NO PEDIDO</Text>
               {lote.map(item => (
                 <View key={item.codigo} style={nm.manualLoteRow}>
                   <View style={nm.itemDot} />
@@ -1398,14 +1263,17 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               ))}
             </View>
 
-            {/* ── Campo 1: ID do Colaborador ──────────────────────── */}
+            {/* Campo único: ID do Colaborador */}
             <View style={nm.manualInputWrap}>
               <View style={nm.manualInputLabelRow}>
                 <UserColaboradorIcon size={13} color={D.orange} />
-                <Text style={nm.manualInputLabel}>ID DO COLABORADOR</Text>
+                <Text style={nm.manualInputLabel}>SEU ID DE COLABORADOR</Text>
                 <View style={nm.requiredBadge}><Text style={nm.requiredText}>Obrigatório</Text></View>
               </View>
-              <View style={[nm.manualInput, inputBorderStyle('colaborador')]}>
+              <View style={[nm.manualInput, {
+                borderColor: focusedField === 'colaborador' ? D.orange : D.nfcBorder,
+                borderWidth: focusedField === 'colaborador' ? 1.8 : 1.5,
+              }]}>
                 <UserColaboradorIcon size={16} color={focusedField === 'colaborador' ? D.orange : 'rgba(255,87,34,0.45)'} />
                 <TextInput
                   style={nm.manualInputText}
@@ -1425,53 +1293,19 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               </View>
             </View>
 
-            {/* ── Campo 2: ID do Crachá (Almoxarife) ─────────────── */}
-            <View style={nm.manualInputWrap}>
-              <View style={nm.manualInputLabelRow}>
-                <KeyAlmoxarifeIcon size={13} color={D.orange} />
-                <Text style={nm.manualInputLabel}>ID DO CRACHÁ (ALMOXARIFE)</Text>
-                <View style={nm.requiredBadge}><Text style={nm.requiredText}>Obrigatório</Text></View>
+            {/* Info box: fluxo explicado */}
+            <View style={nm.flowInfoBox}>
+              <View style={nm.flowStep}>
+                <View style={[nm.flowStepDot, { backgroundColor: D.orange }]} />
+                <Text style={nm.flowStepText}>Você envia a solicitação com seu ID</Text>
               </View>
-              <View style={[nm.manualInput, inputBorderStyle('almoxarife')]}>
-                <KeyAlmoxarifeIcon size={16} color={focusedField === 'almoxarife' ? D.orange : 'rgba(255,87,34,0.45)'} />
-                <TextInput
-                  style={nm.manualInputText}
-                  placeholder="Ex: 0042"
-                  placeholderTextColor="rgba(255,255,255,0.22)"
-                  value={crachaAlmoxarife}
-                  onChangeText={v => { setCrachaAlmoxarife(v); setManualError(''); }}
-                  onFocus={() => setFocusedField('almoxarife')}
-                  onBlur={() => setFocusedField(null)}
-                  keyboardType="numeric"
-                  autoCorrect={false}
-                  editable={!submitting}
-                />
-                {crachaAlmoxarife.length > 0 && (
-                  <View style={nm.inputFilledDot} />
-                )}
+              <View style={nm.flowArrow}><ArrowIcon size={12} color="rgba(255,255,255,0.2)" /></View>
+              <View style={nm.flowStep}>
+                <View style={[nm.flowStepDot, { backgroundColor: D.greenLight }]} />
+                <Text style={nm.flowStepText}>Almoxarife recebe e aprova</Text>
               </View>
             </View>
 
-            {/* Indicador visual dos dois papéis */}
-            <View style={nm.rolesRow}>
-              <View style={nm.roleItem}>
-                <View style={[nm.roleIconBox, { backgroundColor: `${D.orange}18` }]}>
-                  <UserColaboradorIcon size={14} color={D.orange} />
-                </View>
-                <Text style={nm.roleLabel}>Quem retira</Text>
-              </View>
-              <View style={nm.roleArrow}>
-                <ArrowIcon size={14} color="rgba(255,255,255,0.2)" />
-              </View>
-              <View style={nm.roleItem}>
-                <View style={[nm.roleIconBox, { backgroundColor: `${D.orange}18` }]}>
-                  <KeyAlmoxarifeIcon size={14} color={D.orange} />
-                </View>
-                <Text style={nm.roleLabel}>Quem autoriza</Text>
-              </View>
-            </View>
-
-            {/* Mensagem de erro */}
             {!!manualError && (
               <View style={nm.manualError}>
                 <XIcon size={12} color={D.redLight} />
@@ -1479,22 +1313,21 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               </View>
             )}
 
-            {/* Botão de submissão */}
             <TouchableOpacity
               style={[
                 nm.manualSubmitBtn,
-                (submitting || (!crachaColaborador.trim() || !crachaAlmoxarife.trim())) && nm.manualSubmitBtnDisabled,
+                (submitting || !crachaColaborador.trim()) && nm.manualSubmitBtnDisabled,
               ]}
               onPress={handleManualSubmit}
-              disabled={submitting || !crachaColaborador.trim() || !crachaAlmoxarife.trim()}
+              disabled={submitting || !crachaColaborador.trim()}
               activeOpacity={0.88}
             >
               {submitting ? (
                 <ActivityIndicator color={D.white} size="small" />
               ) : (
                 <>
-                  <CheckIcon size={18} color={D.white} />
-                  <Text style={nm.manualSubmitText}>Confirmar + Salvar Auditoria</Text>
+                  <ArrowIcon size={18} color={D.white} />
+                  <Text style={nm.manualSubmitText}>Enviar Solicitação</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -1537,7 +1370,7 @@ const nm = StyleSheet.create({
   waitingSection: { alignItems: 'center', paddingTop: 8 },
   simBtn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderStyle: 'dashed' },
   simBtnText: { fontSize: 12, color: 'rgba(255,255,255,0.25)', fontStyle: 'italic' },
-  acceptBtn: { height: 56, borderRadius: 14, backgroundColor: D.green, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  acceptBtn: { height: 56, borderRadius: 14, backgroundColor: D.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   acceptBtnText: { fontSize: 15, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
   submittingWrap: { alignItems: 'center', gap: 12, paddingVertical: 10 },
   submittingText: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center' },
@@ -1550,84 +1383,241 @@ const nm = StyleSheet.create({
   doneTitle: { fontSize: 20, fontWeight: '900', color: D.white, letterSpacing: -0.3 },
   doneSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center' },
   countdown: { fontSize: 12, color: D.green, fontWeight: '700', marginTop: 4 },
-
-  // ── Manual container ──────────────────────────────────────────────────────
   manualContainer: { flex: 1, padding: 22, gap: 14, justifyContent: 'center' },
   manualHeader: { alignItems: 'center', gap: 8, marginBottom: 4 },
   manualTitle: { fontSize: 22, fontWeight: '900', color: D.white, letterSpacing: -0.3 },
   manualSub: { fontSize: 12, color: 'rgba(255,255,255,0.40)', textAlign: 'center', lineHeight: 18 },
-
   manualLoteResume: { backgroundColor: D.nfcSurface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: D.nfcBorder, gap: 8 },
   manualLoteLabel: { fontSize: 9, fontWeight: '800', color: D.orange, letterSpacing: 1.6 },
   manualLoteRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   manualLoteCode: { fontSize: 10, color: D.orange, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontWeight: '600', minWidth: 72 },
   manualLoteName: { flex: 1, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
   manualLoteQty: { fontSize: 11, fontWeight: '800', color: D.orange },
-
-  // ── Inputs ────────────────────────────────────────────────────────────────
   manualInputWrap: { gap: 7 },
   manualInputLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   manualInputLabel: { fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.38)', letterSpacing: 1.6, flex: 1 },
   requiredBadge: { backgroundColor: `${D.orange}18`, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: D.orangeLine },
   requiredText: { fontSize: 8, fontWeight: '800', color: D.orange, letterSpacing: 0.5 },
-  manualInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: D.nfcSurface,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    height: 54,
-    // borderWidth e borderColor injetados dinamicamente
-  },
+  manualInput: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: D.nfcSurface, borderRadius: 12, paddingHorizontal: 16, height: 54 },
   manualInputText: { flex: 1, fontSize: 16, color: D.white, fontWeight: '600' },
-  inputFilledDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: D.green,
-  },
-
-  // ── Indicador de papéis ───────────────────────────────────────────────────
-  rolesRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  roleItem: { alignItems: 'center', gap: 6, flex: 1 },
-  roleIconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  roleLabel: { fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: '600', letterSpacing: 0.3 },
-  roleArrow: { paddingHorizontal: 4 },
-
+  inputFilledDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: D.green },
+  // Caixa de fluxo explicativo
+  flowInfoBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
+  flowStep: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+  flowStepDot: { width: 7, height: 7, borderRadius: 4, marginTop: 3, flexShrink: 0 },
+  flowStepText: { flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.40)', lineHeight: 16 },
+  flowArrow: { paddingHorizontal: 2 },
   manualError: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: `${D.red}18`, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: `${D.red}30` },
   manualErrorText: { fontSize: 13, color: D.redLight, fontWeight: '600', flex: 1 },
-  manualSubmitBtn: {
-    height: 58,
-    borderRadius: 15,
-    backgroundColor: D.orange,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    shadowColor: D.orangeDark,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 14,
-    elevation: 8,
-  },
+  manualSubmitBtn: { height: 58, borderRadius: 15, backgroundColor: D.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, shadowColor: D.orangeDark, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8 },
   manualSubmitBtnDisabled: { backgroundColor: 'rgba(255,87,34,0.3)', shadowOpacity: 0 },
   manualSubmitText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
 });
 
-// ─── TELA PRINCIPAL ────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// ─── VIEW DO COLABORADOR ─────────────────────────────────────────────────────
+// Catálogo de ferramentas disponíveis + lote + botão "Solicitar Retirada"
+// ════════════════════════════════════════════════════════════════════════════
+interface ColaboradorViewProps {
+  disponíveis: Ferramenta[];
+  minhasFerramentas: Ferramenta[];
+  lote: LoteItem[];
+  loading: boolean;
+  onAdd: (f: Ferramenta) => void;
+  onRemove: (c: string) => void;
+  onQtyChange: (c: string, d: number) => void;
+  onDevolver: () => void;
+  onSolicitar: () => void;
+  fabAnim: Animated.Value;
+  isInLote: (c: string) => boolean;
+}
+
+function ColaboradorView({
+  disponíveis, minhasFerramentas, lote, loading,
+  onAdd, onRemove, onQtyChange, onDevolver, onSolicitar,
+  fabAnim, isInLote,
+}: ColaboradorViewProps) {
+  const totalQty = lote.reduce((a, c) => a + c.qty, 0);
+
+  return (
+    <>
+      <ScrollView
+        style={s.body}
+        contentContainerStyle={[s.bodyContent, { paddingBottom: lote.length > 0 ? 130 : 40 }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {minhasFerramentas.length > 0 && (
+          <View style={s.section}>
+            <MyToolsSection items={minhasFerramentas} onDevolver={onDevolver} />
+          </View>
+        )}
+        {lote.length > 0 && (
+          <View style={s.section}>
+            <SectionHdr label="Meu Pedido" count={totalQty} color={D.orange} />
+            {lote.map(item => (
+              <LoteCard key={item.codigo} item={item} onRemove={onRemove} onQtyChange={onQtyChange} />
+            ))}
+            <View style={s.loteNote}>
+              <NFCChipIcon size={14} color={D.orange} />
+              <Text style={s.loteNoteText}>Toque em "Solicitar Retirada" para enviar ao Almoxarife. Você receberá a confirmação assim que aprovado.</Text>
+            </View>
+          </View>
+        )}
+        <View style={s.section}>
+          <SectionHdr label="Ferramentas Disponíveis" count={disponíveis.length} color={D.greenLight} />
+          {loading ? (
+            <View style={s.loadState}>
+              <ActivityIndicator color={D.orange} size="large" />
+              <Text style={s.loadText}>Carregando ativos…</Text>
+            </View>
+          ) : disponíveis.length === 0 ? (
+            <View style={s.emptyState}>
+              <Text style={s.emptyIcon}>🔧</Text>
+              <Text style={s.emptyTitle}>Nenhum ativo disponível</Text>
+              <Text style={s.emptySub}>Todos os ativos estão alocados ou em manutenção</Text>
+            </View>
+          ) : (
+            disponíveis.map((item, idx) => (
+              <AvailableCard key={item.codigo} item={item} index={idx} onAdd={onAdd} isInLote={isInLote(item.codigo)} />
+            ))
+          )}
+        </View>
+      </ScrollView>
+      <LoteFooter count={totalQty} onSolicitar={onSolicitar} anim={fabAnim} />
+    </>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ─── VIEW DO ALMOXARIFE ──────────────────────────────────────────────────────
+// Dashboard: quem está com o quê, atrasos, histórico de auditoria.
+// Não exibe catálogo nem lote — almoxarife não pede ferramentas.
+// ════════════════════════════════════════════════════════════════════════════
+interface AlmoxarifeViewProps {
+  todasFerramentas: Ferramenta[];
+  emUso: Ferramenta[];
+  disponiveis: number;
+  atrasos: number;
+  loading: boolean;
+  onOpenLogs: () => void;
+  headerAnim: Animated.Value;
+  onRefresh: () => void;
+}
+
+function AlmoxarifeView({
+  todasFerramentas, emUso, disponiveis, atrasos, loading, onOpenLogs, headerAnim, onRefresh,
+}: AlmoxarifeViewProps) {
+  return (
+    <ScrollView
+      style={s.body}
+      contentContainerStyle={[s.bodyContent, { paddingBottom: 40 }]}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Seção: Em Custódia (quem está com o quê) */}
+      <View style={s.section}>
+        <SectionHdr label="Em custódia agora" count={emUso.length} color={D.redLight} />
+        {loading ? (
+          <View style={s.loadState}>
+            <ActivityIndicator color={D.orange} size="large" />
+            <Text style={s.loadText}>Carregando inventário…</Text>
+          </View>
+        ) : emUso.length === 0 ? (
+          <View style={s.emptyState}>
+            <Text style={s.emptyIcon}>✅</Text>
+            <Text style={s.emptyTitle}>Nenhuma ferramenta alocada</Text>
+            <Text style={s.emptySub}>Todo o estoque está disponível no momento</Text>
+          </View>
+        ) : (
+          emUso.map((item, idx) => (
+            <View key={item.codigo} style={adv.card}>
+              {item.custodiaDesde && (Date.now() - item.custodiaDesde) > 4 * 60 * 60 * 1000 && (
+                <View style={adv.overdueStrip} />
+              )}
+              <View style={[adv.iconBox, { backgroundColor: D.redBg }]}>
+                <WrenchIcon size={15} color={D.redLight} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={adv.name} numberOfLines={1}>{item.nome}</Text>
+                <View style={adv.metaRow}>
+                  <Text style={adv.code}>{item.codigo}</Text>
+                  {item.alocadoPara ? (
+                    <>
+                      <View style={adv.sep} />
+                      <UserColaboradorIcon size={10} color={D.slate} />
+                      <Text style={adv.allocText}>{item.alocadoPara}</Text>
+                    </>
+                  ) : null}
+                </View>
+              </View>
+              <View style={adv.rightCol}>
+                {item.custodiaDesde ? <CustodyTimer since={item.custodiaDesde} /> : <StatusBadge status={item.status} />}
+                <LocateButton codigo={item.codigo} nome={item.nome} />
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+
+      {/* Seção: Inventário completo (todos os itens para visão gerencial) */}
+      <View style={s.section}>
+        <SectionHdr label="Inventário Completo" count={todasFerramentas.length} color={D.greenLight} />
+        {!loading && todasFerramentas.filter(f => f.status !== 'Em uso').map(item => (
+          <View key={item.codigo} style={[adv.card, { borderColor: D.silver }]}>
+            <View style={[adv.iconBox, { backgroundColor: D.orangeSoft }]}>
+              <WrenchIcon size={15} color={D.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={adv.name} numberOfLines={1}>{item.nome}</Text>
+              <Text style={adv.code}>{item.codigo} · {item.categoria}</Text>
+            </View>
+            <StatusBadge status={item.status} />
+          </View>
+        ))}
+      </View>
+
+      {/* Banner informativo: bloqueio de auto-retirada */}
+      <View style={adv.infoBlock}>
+        <View style={adv.infoIconBox}>
+          <LockIcon size={18} color={D.orange} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={adv.infoTitle}>Retiradas bloqueadas para Almoxarife</Text>
+          <Text style={adv.infoDesc}>
+            Somente Colaboradores podem solicitar ferramentas. Almoxarife detém a custódia legal do estoque e não pode fazer pedidos para si mesmo.
+          </Text>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+const adv = StyleSheet.create({
+  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: D.white, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 13, borderWidth: 1.5, borderColor: `${D.red}20`, marginBottom: 7, overflow: 'hidden' },
+  overdueStrip: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: D.orange },
+  iconBox: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  name: { fontSize: 13, fontWeight: '700', color: D.obsidian },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 5 },
+  code: { fontSize: 10, color: D.slate, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontWeight: '600' },
+  sep: { width: 1, height: 9, backgroundColor: D.cloud },
+  allocText: { fontSize: 10, color: D.iron, fontWeight: '600' },
+  rightCol: { alignItems: 'flex-end', gap: 4 },
+  infoBlock: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: D.orangeSoft, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: D.orangeLine, marginTop: 8 },
+  infoIconBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: `${D.orange}18`, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  infoTitle: { fontSize: 12, fontWeight: '800', color: D.obsidian, marginBottom: 4 },
+  infoDesc: { fontSize: 11, color: D.iron, lineHeight: 16 },
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ─── TELA PRINCIPAL ──────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
 export default function AlmoxarifadoScreen() {
+  // ── Role — fonte única de verdade ─────────────────────────────────────────
+  const { user, isLoading: authLoading } = useAuth();
+  const isAlmoxarife = user?.role === 'almoxarife';
+  const isColaborador = !isAlmoxarife; // colaborador, admin sem papel especial, etc.
+
+  const [todasFerramentas, setTodasFerramentas] = useState<Ferramenta[]>([]);
   const [minhasFerramentas, setMinhasFerramentas] = useState<Ferramenta[]>([]);
   const [disponíveis, setDisponíveis] = useState<Ferramenta[]>([]);
   const [lote, setLote] = useState<LoteItem[]>([]);
@@ -1635,15 +1625,17 @@ export default function AlmoxarifadoScreen() {
   const [libModalVisible, setLibModalVisible] = useState(false);
   const [auditLogVisible, setAuditLogVisible] = useState(false);
   const [toastState, setToastState] = useState({ visible: false, msg: '', type: 'success' as 'success' | 'error' | 'info' });
+
   const {
-  solicitacaoAtual,
-  modalVisible: solicitacaoModalVisible,
-  aprovando,
-  recusando,
-  aprovar,
-  recusar,
-  fecharModal,
-} = useSolicitacoesListener();
+    solicitacaoAtual,
+    modalVisible: solicitacaoModalVisible,
+    aprovando,
+    recusando,
+    aprovar,
+    recusar,
+    fecharModal,
+  } = useSolicitacoesListener();
+
   const headerAnim = useRef(new Animated.Value(0)).current;
   const fabAnim = useRef(new Animated.Value(0)).current;
 
@@ -1653,8 +1645,9 @@ export default function AlmoxarifadoScreen() {
   }, []);
 
   useEffect(() => {
-    Animated.spring(fabAnim, { toValue: lote.length > 0 ? 1 : 0, tension: 110, friction: 12, useNativeDriver: true }).start();
-  }, [lote.length]);
+    // FAB só faz sentido para colaborador
+    Animated.spring(fabAnim, { toValue: (!isAlmoxarife && lote.length > 0) ? 1 : 0, tension: 110, friction: 12, useNativeDriver: true }).start();
+  }, [lote.length, isAlmoxarife]);
 
   const loadData = async () => {
     try {
@@ -1670,6 +1663,12 @@ export default function AlmoxarifadoScreen() {
       const todas: Ferramenta[] = todasRes.status === 'fulfilled' ? (todasRes.value ?? []) : [];
       const minhas: Ferramenta[] = minhasRes.status === 'fulfilled' ? (minhasRes.value ?? []) : [];
 
+      // Para o almoxarife, enriquecer todas as ferramentas Em Uso com custodyTimer
+      const todasComTimer = todas.map((f: Ferramenta) => f.status === 'Em uso'
+        ? { ...f, custodiaDesde: custodyTs[f.codigo] ?? undefined }
+        : f
+      );
+
       const minhasComTimer = minhas
         .filter((f: Ferramenta) => f.status === 'Em uso')
         .map((f: Ferramenta) => ({
@@ -1681,10 +1680,12 @@ export default function AlmoxarifadoScreen() {
       minhasComTimer.forEach(f => { if (!newTs[f.codigo]) newTs[f.codigo] = f.custodiaDesde!; });
       await saveCustodyTimestamps(newTs);
 
+      setTodasFerramentas(todasComTimer);
       setMinhasFerramentas(minhasComTimer);
       setDisponíveis(todas.filter((f: Ferramenta) => f.status === 'Disponível'));
     } catch (err: any) {
       showToast('Erro ao carregar ferramentas: ' + (err.message || 'Falha na API'), 'error');
+      setTodasFerramentas([]);
       setDisponíveis([]);
       setMinhasFerramentas([]);
     } finally {
@@ -1708,8 +1709,16 @@ export default function AlmoxarifadoScreen() {
     setLote(prev => prev.map(i => i.codigo === codigo ? { ...i, qty: Math.max(1, i.qty + delta) } : i));
   };
 
+  /**
+   * handleLibSuccess — GUARD DE ROLE
+   * Almoxarife nunca deve chegar aqui via UI normal (FAB oculto),
+   * mas adicionamos um guard explícito como segunda camada de defesa.
+   */
   const handleLibSuccess = async (crachaColaborador: string, metodo: 'NFC' | 'MANUAL') => {
-    const crachaAlmoxarife = await AsyncStorage.getItem('userCracha') ?? 'desconhecido';
+    // ── GUARD: Almoxarife não pode retirar ferramentas para si mesmo ─────────
+    if (isAlmoxarife) {
+      throw new Error('Almoxarife não pode realizar retiradas. Somente colaboradores podem solicitar ferramentas.');
+    }
 
     await apiClient.retirar({
       cracha_colaborador: crachaColaborador,
@@ -1721,8 +1730,8 @@ export default function AlmoxarifadoScreen() {
       timestamp: Date.now(),
       acao: 'RETIRADA',
       ferramentas: lote.map(f => ({ codigo: f.codigo, nome: f.nome, qty: f.qty })),
-      responsavel: crachaAlmoxarife,
-      autorizador: crachaColaborador,
+      responsavel: crachaColaborador,
+      autorizador: 'PENDENTE_APROVACAO',
       metodo,
     };
     await saveAuditLog(log);
@@ -1732,7 +1741,7 @@ export default function AlmoxarifadoScreen() {
     await saveCustodyTimestamps(custodyTs);
 
     setLote([]);
-    showToast(`✅ ${lote.length} ${lote.length === 1 ? 'ferramenta retirada' : 'ferramentas retiradas'} · Log salvo`, 'success');
+    showToast(`✅ Solicitação enviada · ${lote.length} ${lote.length === 1 ? 'ferramenta' : 'ferramentas'}`, 'success');
     await loadData();
   };
 
@@ -1744,9 +1753,14 @@ export default function AlmoxarifadoScreen() {
   };
 
   const isInLote = (codigo: string) => lote.some(i => i.codigo === codigo);
-  const totalQty = lote.reduce((a, c) => a + c.qty, 0);
   const headerTY = headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] });
-  const atrasos = minhasFerramentas.filter(f => f.custodiaDesde && (Date.now() - f.custodiaDesde) > 4 * 60 * 60 * 1000).length;
+  const emUso = todasFerramentas.filter(f => f.status === 'Em uso');
+  const atrasos = emUso.filter(f => f.custodiaDesde && (Date.now() - f.custodiaDesde) > 4 * 60 * 60 * 1000).length;
+
+  // Subtítulo dinâmico por role
+  const headerSubtitle = isAlmoxarife
+    ? `Dashboard · ${emUso.length} alocadas · ${disponíveis.length} disponíveis`
+    : 'Solicite ferramentas para o seu turno';
 
   return (
     <View style={s.root}>
@@ -1762,82 +1776,101 @@ export default function AlmoxarifadoScreen() {
           <View style={s.headerRow}>
             <View>
               <Text style={s.headerTitle}>Almoxarifado</Text>
-              <Text style={s.headerSub}>Sistema de Gestão Industrial</Text>
+              <Text style={s.headerSub}>{headerSubtitle}</Text>
             </View>
-            <TouchableOpacity style={s.refreshBtn} onPress={loadData} activeOpacity={0.7}>
-              <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
-                <Path d="M23 4v6h-6" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-                <Path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </TouchableOpacity>
+            <View style={s.headerRight}>
+              {/* Botão de Auditoria só para almoxarife no header */}
+              {isAlmoxarife && (
+                <TouchableOpacity style={s.auditBtn} onPress={() => setAuditLogVisible(true)} activeOpacity={0.7}>
+                  <LogIcon size={14} color="rgba(255,255,255,0.8)" />
+                  <Text style={s.auditBtnText}>Auditoria</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={s.refreshBtn} onPress={loadData} activeOpacity={0.7}>
+                <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
+                  <Path d="M23 4v6h-6" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                  <Path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </TouchableOpacity>
+            </View>
           </View>
-          <ShiftStatusCard
-            emUso={minhasFerramentas.length}
-            disponiveis={disponíveis.length}
-            noLote={lote.length}
-            atrasos={atrasos}
-            onOpenLogs={() => setAuditLogVisible(true)}
-            headerAnim={headerAnim}
-          />
+
+          {/* ShiftStatusCard só aparece para o Almoxarife */}
+          {isAlmoxarife && (
+            <ShiftStatusCard
+              emUso={emUso.length}
+              disponiveis={disponíveis.length}
+              noLote={0}
+              atrasos={atrasos}
+              onOpenLogs={() => setAuditLogVisible(true)}
+              headerAnim={headerAnim}
+            />
+          )}
+
+          {/* Colaborador: banner de boas-vindas simples */}
+          {isColaborador && (
+            <Animated.View style={[s.colaboradorBanner, { opacity: headerAnim }]}>
+              <NFCChipIcon size={18} color={D.white} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.colaboradorBannerTitle}>Selecione as ferramentas que precisa</Text>
+                <Text style={s.colaboradorBannerSub}>Adicione ao pedido e envie para aprovação do Almoxarife</Text>
+              </View>
+            </Animated.View>
+          )}
         </Animated.View>
       </SafeAreaView>
 
-      <ScrollView
-        style={s.body}
-        contentContainerStyle={[s.bodyContent, { paddingBottom: lote.length > 0 ? 130 : 40 }]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {minhasFerramentas.length > 0 && (
-          <View style={s.section}>
-            <MyToolsSection items={minhasFerramentas} onDevolver={handleDevolver} />
-          </View>
-        )}
-        {lote.length > 0 && (
-          <View style={s.section}>
-            <SectionHdr label="Lote de Retirada" count={totalQty} color={D.orange} />
-            {lote.map(item => (
-              <LoteCard key={item.codigo} item={item} onRemove={removeFromLote} onQtyChange={changeQty} />
-            ))}
-            <View style={s.loteNote}>
-              <NFCChipIcon size={14} color={D.orange} />
-              <Text style={s.loteNoteText}>Clique em "Solicitar Liberação" para confirmar via NFC ou crachá manual. Log de auditoria será salvo automaticamente.</Text>
-            </View>
-          </View>
-        )}
-        <View style={s.section}>
-          <SectionHdr label="Ativos Disponíveis" count={disponíveis.length} color={D.greenLight} />
-          {loading ? (
-            <View style={s.loadState}>
-              <ActivityIndicator color={D.orange} size="large" />
-              <Text style={s.loadText}>Carregando ativos…</Text>
-            </View>
-          ) : disponíveis.length === 0 ? (
-            <View style={s.emptyState}>
-              <Text style={s.emptyIcon}>🔧</Text>
-              <Text style={s.emptyTitle}>Nenhum ativo disponível</Text>
-              <Text style={s.emptySub}>Todos os ativos estão alocados ou em manutenção</Text>
-            </View>
-          ) : (
-            disponíveis.map((item, idx) => (
-              <AvailableCard key={item.codigo} item={item} index={idx} onAdd={addToLote} isInLote={isInLote(item.codigo)} />
-            ))
-          )}
-        </View>
-      </ScrollView>
+      {/* ── VIEW CONDICIONAL POR ROLE ── */}
+      {isAlmoxarife ? (
+        <AlmoxarifeView
+          todasFerramentas={todasFerramentas}
+          emUso={emUso}
+          disponiveis={disponíveis.length}
+          atrasos={atrasos}
+          loading={loading}
+          onOpenLogs={() => setAuditLogVisible(true)}
+          headerAnim={headerAnim}
+          onRefresh={loadData}
+        />
+      ) : (
+        <ColaboradorView
+          disponíveis={disponíveis}
+          minhasFerramentas={minhasFerramentas}
+          lote={lote}
+          loading={loading}
+          onAdd={addToLote}
+          onRemove={removeFromLote}
+          onQtyChange={changeQty}
+          onDevolver={handleDevolver}
+          onSolicitar={() => setLibModalVisible(true)}
+          fabAnim={fabAnim}
+          isInLote={isInLote}
+        />
+      )}
 
-      <LoteFooter count={totalQty} onSolicitar={() => setLibModalVisible(true)} anim={fabAnim} />
-      <LibModal visible={libModalVisible} lote={lote} onClose={() => setLibModalVisible(false)} onSuccess={handleLibSuccess} />
+      {/* Modal de solicitação — só colaborador pode abrir */}
+      {isColaborador && (
+        <LibModal
+          visible={libModalVisible}
+          lote={lote}
+          onClose={() => setLibModalVisible(false)}
+          onSuccess={handleLibSuccess}
+        />
+      )}
+
       <AuditLogModal visible={auditLogVisible} onClose={() => setAuditLogVisible(false)} />
+
+      {/* Modal de aprovação — só almoxarife recebe via polling */}
       <SolicitacaoModal
-  visible={solicitacaoModalVisible}
-  solicitacao={solicitacaoAtual}
-  aprovando={aprovando}
-  recusando={recusando}
-  onAprovar={aprovar}
-  onRecusar={recusar}
-  onFechar={fecharModal}
-/>
+        visible={solicitacaoModalVisible}
+        solicitacao={solicitacaoAtual}
+        aprovando={aprovando}
+        recusando={recusando}
+        onAprovar={aprovar}
+        onRecusar={recusar}
+        onFechar={fecharModal}
+      />
+
       <Toast message={toastState.msg} visible={toastState.visible} type={toastState.type} />
     </View>
   );
@@ -1852,7 +1885,14 @@ const s = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 },
   headerTitle: { fontSize: 26, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
   headerSub: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 3, fontWeight: '500', letterSpacing: 0.2 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  auditBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.14)', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+  auditBtnText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.8)' },
   refreshBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+  // Banner do colaborador
+  colaboradorBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(255,255,255,0.14)', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  colaboradorBannerTitle: { fontSize: 13, fontWeight: '800', color: D.white },
+  colaboradorBannerSub: { fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 2 },
   body: { flex: 1, backgroundColor: D.snow, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   bodyContent: { paddingHorizontal: 16, paddingTop: 18 },
   section: { marginBottom: 6 },

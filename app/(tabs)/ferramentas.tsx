@@ -36,6 +36,8 @@ import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop } from 'react
 import { apiClient } from '../../services/api';
 import { nfcService } from '../../services/nfc';
 import { useAuth } from '@/hooks/useAuth';
+import { useNotificacoes } from '@/hooks/useNotificacoes';
+import { HeaderNotificationButton } from '@/components/HeaderNotificationButton';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -703,6 +705,7 @@ const stb = StyleSheet.create({
 export default function FerramentasScreen() {
   // ── Role — decide se o botão de troca aparece ─────────────────────────────
   const { user } = useAuth();
+  const { naoLidas, startPolling, stopPolling } = useNotificacoes();
   const canTransfer = user?.role === 'colaborador';
 
   const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
@@ -734,7 +737,12 @@ export default function FerramentasScreen() {
       ]),
     ]).start();
     load();
-  }, []);
+    startPolling();
+    
+    return () => {
+      stopPolling();
+    };
+  }, [startPolling, stopPolling]);
 
   const load = async () => {
     try {
@@ -797,12 +805,15 @@ export default function FerramentasScreen() {
                 {counts.Todos} itens · {canTransfer ? 'toque em "Em uso" para transferir' : 'visão gerencial'}
               </Text>
             </View>
-            <TouchableOpacity onPress={load} style={s.refreshBtn} activeOpacity={0.7}>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M23 4v6h-6" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-                <Path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </TouchableOpacity>
+            <View style={s.headerActions}>
+              <HeaderNotificationButton count={naoLidas} size={24} color="rgba(255,255,255,0.85)" />
+              <TouchableOpacity onPress={load} style={s.refreshBtn} activeOpacity={0.7}>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path d="M23 4v6h-6" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                  <Path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke="rgba(255,255,255,0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </TouchableOpacity>
+            </View>
           </View>
           <View style={s.statsBar}>
             <StatBox value={counts['Disponível']} label="Disponíveis" anim={statAnim1} />
@@ -919,6 +930,7 @@ const s = StyleSheet.create({
   headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
   headerTitle: { fontSize: 28, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
   headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2, fontWeight: '500' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   refreshBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
   statsBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.14)', borderRadius: 16, paddingVertical: 14, paddingHorizontal: 6 },
   statsDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.15)' },

@@ -1717,7 +1717,7 @@ export default function AlmoxarifadoScreen() {
   const handleLibSuccess = async (crachaColaborador: string, metodo: 'NFC' | 'MANUAL') => {
     // ── GUARD: Almoxarife não pode retirar ferramentas para si mesmo ─────────
     if (isAlmoxarife) {
-      throw new Error('Almoxarife não pode realizar retiradas. Somente colaboradores podem solicitar ferramentas.');
+      throw new Error('Almoxarife não pode solicitar ferramentas para si mesmo. Apenas colaboradores podem pedir; o almoxarife aprova.');
     }
 
     await apiClient.retirar({

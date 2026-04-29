@@ -42,6 +42,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { apiClient } from '../../services/api';
+import { nfcService } from '../../services/nfc'; // <-- ADICIONE ESTA LINHA
 import { useAuth } from '@/hooks/useAuth';
 import { useSolicitacoesListener } from '../../hooks/useSolicitacoesListener';
 import { useNotificacoes } from '@/hooks/useNotificacoes';
@@ -58,38 +59,38 @@ const AUDIT_LOG_KEY = 'marilan_audit_logs';
 const CUSTODY_TIMESTAMPS_KEY = 'marilan_custody_timestamps';
 
 const D = {
-  orange:     '#FF5722',
-  orangeHot:  '#FF6D00',
+  orange: '#FF5722',
+  orangeHot: '#FF6D00',
   orangeDark: '#BF360C',
   orangeSoft: 'rgba(255,87,34,0.10)',
   orangeGlow: 'rgba(255,87,34,0.18)',
   orangeLine: 'rgba(255,87,34,0.25)',
-  white:      '#FFFFFF',
-  snow:       '#FAFAFA',
-  mist:       '#F5F5F5',
-  cloud:      '#EEEEEE',
-  silver:     '#E0E0E0',
-  ash:        '#BDBDBD',
-  slate:      '#9E9E9E',
-  iron:       '#616161',
-  carbon:     '#424242',
-  obsidian:   '#212121',
-  green:      '#2E7D32',
+  white: '#FFFFFF',
+  snow: '#FAFAFA',
+  mist: '#F5F5F5',
+  cloud: '#EEEEEE',
+  silver: '#E0E0E0',
+  ash: '#BDBDBD',
+  slate: '#9E9E9E',
+  iron: '#616161',
+  carbon: '#424242',
+  obsidian: '#212121',
+  green: '#2E7D32',
   greenLight: '#43A047',
-  greenBg:    'rgba(46,125,50,0.08)',
-  greenText:  '#1B5E20',
-  red:        '#C62828',
-  redLight:   '#E53935',
-  redBg:      'rgba(198,40,40,0.08)',
-  amber:      '#E65100',
-  amberBg:    'rgba(230,81,0,0.08)',
-  amberText:  '#BF360C',
-  blue:       '#1565C0',
-  blueBg:     'rgba(21,101,192,0.08)',
-  blueLight:  '#1976D2',
-  nfcBg:      '#0D0D0D',
+  greenBg: 'rgba(46,125,50,0.08)',
+  greenText: '#1B5E20',
+  red: '#C62828',
+  redLight: '#E53935',
+  redBg: 'rgba(198,40,40,0.08)',
+  amber: '#E65100',
+  amberBg: 'rgba(230,81,0,0.08)',
+  amberText: '#BF360C',
+  blue: '#1565C0',
+  blueBg: 'rgba(21,101,192,0.08)',
+  blueLight: '#1976D2',
+  nfcBg: '#0D0D0D',
   nfcSurface: '#1A1A1A',
-  nfcBorder:  'rgba(255,87,34,0.3)',
+  nfcBorder: 'rgba(255,87,34,0.3)',
 };
 
 type FerStatus = 'Disponível' | 'Em uso' | 'Em manutenção';
@@ -101,6 +102,7 @@ interface Ferramenta {
   status: FerStatus;
   alocadoPara?: string;
   custodiaDesde?: number;
+  aguardandoDevolucao?: boolean; // <-- Adicione esta linha
 }
 
 interface LoteItem extends Ferramenta {
@@ -159,7 +161,7 @@ async function loadCustodyTimestamps(): Promise<Record<string, number>> {
 async function saveCustodyTimestamps(ts: Record<string, number>): Promise<void> {
   try {
     await AsyncStorage.setItem(CUSTODY_TIMESTAMPS_KEY, JSON.stringify(ts));
-  } catch {}
+  } catch { }
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -680,6 +682,10 @@ const ssc = StyleSheet.create({
 function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver: () => void }) {
   const [expanded, setExpanded] = useState(true);
   if (items.length === 0) return null;
+
+  // Filtra para saber se ainda tem algo que pode ser devolvido
+  const ferramentasParaDevolver = items.filter(i => !i.aguardandoDevolucao);
+
   return (
     <View style={my.wrap}>
       <TouchableOpacity style={my.header} onPress={() => setExpanded(v => !v)} activeOpacity={0.8}>
@@ -696,6 +702,7 @@ function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver
           </Svg>
         </View>
       </TouchableOpacity>
+
       {expanded && (
         <View style={my.listWrap}>
           {items.map((item, idx) => (
@@ -705,7 +712,16 @@ function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver
                 <View style={{ flex: 1 }}>
                   <Text style={my.itemName} numberOfLines={1}>{item.nome}</Text>
                   <View style={my.itemTagRow}>
-                    {item.custodiaDesde ? <CustodyTimer since={item.custodiaDesde} /> : <Text style={my.itemCat}>{item.categoria}</Text>}
+                    {/* Renderiza a Tag de Aguardando Devolução OU o Timer */}
+                    {item.aguardandoDevolucao ? (
+                      <View style={{ backgroundColor: D.amberBg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: D.amber }}>
+                        <Text style={{ fontSize: 9, color: D.amberText, fontWeight: '700' }}>AGUARDANDO ALMOXARIFE</Text>
+                      </View>
+                    ) : item.custodiaDesde ? (
+                      <CustodyTimer since={item.custodiaDesde} />
+                    ) : (
+                      <Text style={my.itemCat}>{item.categoria}</Text>
+                    )}
                     <LocateButton codigo={item.codigo} nome={item.nome} />
                   </View>
                 </View>
@@ -713,10 +729,14 @@ function MyToolsSection({ items, onDevolver }: { items: Ferramenta[]; onDevolver
               <StatusBadge status={item.status} />
             </View>
           ))}
-          <TouchableOpacity style={my.devolverBtn} onPress={onDevolver} activeOpacity={0.85}>
-            <BackIcon size={15} color={D.orange} />
-            <Text style={my.devolverText}>Iniciar Devolução</Text>
-          </TouchableOpacity>
+
+          {/* Só mostra o botão se tiver ferramenta que não está pendente */}
+          {ferramentasParaDevolver.length > 0 && (
+            <TouchableOpacity style={my.devolverBtn} onPress={onDevolver} activeOpacity={0.85}>
+              <BackIcon size={15} color={D.orange} />
+              <Text style={my.devolverText}>Iniciar Devolução ({ferramentasParaDevolver.length})</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
     </View>
@@ -908,59 +928,58 @@ const lf = StyleSheet.create({
 });
 
 // ─── AWAITING CONFIRMATION SCREEN ────────────────────────────────────────────
-function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClose: () => void }) {
+function AwaitingConfirmationScreen({ lote, solicitacaoId, onClose }: { lote: LoteItem[]; solicitacaoId: number; onClose: () => void }) {
+  const [status, setStatus] = useState<'waiting' | 'approved' | 'rejected'>('waiting');
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const dotAnim1 = useRef(new Animated.Value(0)).current;
-  const dotAnim2 = useRef(new Animated.Value(0)).current;
-  const dotAnim3 = useRef(new Animated.Value(0)).current;
   const slideIn = useRef(new Animated.Value(30)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
+  // 1️⃣ LÓGICA DE ANIMAÇÃO (Mantemos como estava)
   useEffect(() => {
     Animated.parallel([
       Animated.spring(slideIn, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
       Animated.timing(opacity, { toValue: 1, duration: 350, useNativeDriver: true }),
     ]).start();
 
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1.1, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
       ])
-    ).start();
+    );
+    if (status === 'waiting') loop.start();
+    else loop.stop();
+    return () => loop.stop();
+  }, [status]);
 
-    const dotLoop = (anim: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(anim, { toValue: 1, duration: 400, useNativeDriver: true }),
-          Animated.timing(anim, { toValue: 0.25, duration: 400, useNativeDriver: true }),
-        ])
-      ).start();
+  // 2️⃣ LÓGICA SIMPLIFICADA (Substituímos o polling por um timer de 5s)
+  useEffect(() => {
+    // Inicia o contador de 5 segundos (5000 ms)
+    const timer = setTimeout(() => {
+      onClose(); // Fecha a tela automaticamente
+    }, 5000);
 
-    dotLoop(dotAnim1, 0);
-    dotLoop(dotAnim2, 200);
-    dotLoop(dotAnim3, 400);
-  }, []);
-
-  const totalQty = lote.reduce((a, c) => a + c.qty, 0);
+    // Limpa o timer caso o utilizador feche a janela manualmente antes dos 5 segundos
+    return () => clearTimeout(timer);
+  }, [onClose]);
 
   return (
     <Animated.View style={[aw.container, { opacity, transform: [{ translateY: slideIn }] }]}>
-      <Animated.View style={[aw.iconRing, { transform: [{ scale: pulseAnim }] }]}>
-        <View style={aw.iconRingInner}>
+
+      {/* Ícone de espera animado */}
+      <Animated.View style={[aw.iconRing, { transform: [{ scale: pulseAnim }], borderColor: D.orangeLine }]}>
+        <View style={[aw.iconRingInner, { backgroundColor: `${D.orange}20`, borderColor: `${D.orange}35` }]}>
           <AwaitingIcon size={44} color={D.orange} />
         </View>
       </Animated.View>
+
+      {/* Textos */}
       <View style={aw.textBlock}>
         <Text style={aw.title}>Solicitação Enviada!</Text>
-        <Text style={aw.subtitle}>Aguardando aprovação do{'\n'}Almoxarife</Text>
+        <Text style={aw.subtitle}>Aguardando aprovação do{'\n'}Almoxarife...</Text>
       </View>
-      <View style={aw.dotsRow}>
-        {[dotAnim1, dotAnim2, dotAnim3].map((d, i) => (
-          <Animated.View key={i} style={[aw.dot, { opacity: d }]} />
-        ))}
-      </View>
+
+      {/* Lista de Itens */}
       <View style={aw.loteCard}>
         <Text style={aw.loteCardTitle}>ITENS DA SOLICITAÇÃO</Text>
         {lote.map(item => (
@@ -973,22 +992,13 @@ function AwaitingConfirmationScreen({ lote, onClose }: { lote: LoteItem[]; onClo
             </View>
           </View>
         ))}
-        <View style={aw.loteSeparator} />
-        <View style={aw.loteTotalRow}>
-          <Text style={aw.loteTotalLabel}>Total de itens</Text>
-          <Text style={aw.loteTotalQty}>{totalQty}</Text>
-        </View>
       </View>
-      <View style={aw.instructionBar}>
-        <View style={aw.instructionDot} />
-        <Text style={aw.instructionText}>
-          O Almoxarife receberá a notificação e deverá confirmar no terminal. Mantenha o app aberto.
-        </Text>
-      </View>
+
+      {/* Botão de fechar (caso ele não queira esperar os 5s) */}
       <TouchableOpacity style={aw.closeBtn} onPress={onClose} activeOpacity={0.85}>
-        <Text style={aw.closeBtnText}>Fechar e Aguardar</Text>
-        <ArrowIcon size={15} color={D.white} />
+        <Text style={aw.closeBtnText}>Fechar Janela</Text>
       </TouchableOpacity>
+
     </Animated.View>
   );
 }
@@ -1028,24 +1038,21 @@ interface LibModalProps {
   visible: boolean;
   lote: LoteItem[];
   onClose: () => void;
-  onSuccess: (crachaColaborador: string, metodo: 'NFC' | 'MANUAL') => Promise<void>;
+  // Muda de Promise<void> para Promise<number>
+  onSuccess: (crachaAlmoxarife: string, metodo: 'NFC' | 'MANUAL') => Promise<number>;
 }
 
 function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
   const [mode, setMode] = useState<LibMode>('nfc');
   const [nfcPhase, setNfcPhase] = useState<NFCPhase>('waiting');
-  
-  // 1️⃣ MUDANÇA AQUI: Trocámos "crachaColaborador" por "crachaAlmoxarife"
   const [crachaAlmoxarife, setCrachaAlmoxarife] = useState('');
-  
+  const [solicitacaoId, setSolicitacaoId] = useState<number | null>(null);
   const [manualPhase, setManualPhase] = useState<ManualPhase>('form');
   const [manualError, setManualError] = useState('');
-  
-  // 2️⃣ MUDANÇA AQUI: Trocámos o tipo de 'colaborador' para 'almoxarife'
   const [focusedField, setFocusedField] = useState<'almoxarife' | null>(null);
-  
   const [submitting, setSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(3);
+  
   const bgOpacity = useRef(new Animated.Value(0)).current;
   const contentSlide = useRef(new Animated.Value(60)).current;
   const contentOpacity = useRef(new Animated.Value(0)).current;
@@ -1053,14 +1060,12 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
   const countdownAnim = useRef(new Animated.Value(1)).current;
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // 1. ANIMAÇÕES DE ABERTURA
   useEffect(() => {
     if (visible) {
       setMode('nfc');
       setNfcPhase('waiting');
-      
-      // 3️⃣ MUDANÇA AQUI: Usamos a nova função para limpar o campo ao abrir o modal
       setCrachaAlmoxarife('');
-      
       setManualPhase('form');
       setManualError('');
       setFocusedField(null);
@@ -1076,6 +1081,63 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
       if (countdownRef.current) clearInterval(countdownRef.current);
     }
   }, [visible]);
+
+  // 2. A MÁGICA DO NFC: Fica ouvindo enquanto estiver na tela NFC
+  useEffect(() => {
+    let isReading = false;
+    
+    const startNfcRead = async () => {
+      isReading = true;
+      try {
+        const res = await nfcService.readTag();
+        if (!isReading) return; // Se o modal fechou antes de ler, aborta
+
+        if (res.success && res.data) {
+          setNfcPhase('simulated_connected'); // Muda a UI para mostrar que leu o chip
+          
+          try {
+            // Vai na API descobrir de quem é o chip
+            const usuario = await apiClient.buscarUsuarioPorNFC(res.data);
+            
+            // Trava de segurança: Se o chip não for de um almoxarife, bloqueia!
+            if (usuario.role !== 'almoxarife') {
+              setManualError(`O crachá lido pertence a ${usuario.nome}, que não é um Almoxarife.`);
+              setNfcPhase('error');
+              return;
+            }
+
+            // Deu certo! Salva o crachá e vai pra tela de confirmação final
+            setCrachaAlmoxarife(usuario.cracha);
+            setTimeout(() => setNfcPhase('confirming'), 600);
+            
+          } catch (apiErr) {
+            // MUDANÇA AQUI: Adicione este Alert para você ver o ID!
+            Alert.alert(
+              "Tag Não Cadastrada", 
+              `O ID deste chip é:\n\n${res.data}\n\nColoque este código na coluna nfc_id do Almoxarife no banco de dados.`
+            );
+            
+            setManualError('Tag NFC não cadastrada ou erro de rede.');
+            setNfcPhase('error');
+          }
+        } else if (res.error !== 'Leitura cancelada') {
+          setManualError(res.error || 'Erro ao ler chip.');
+          setNfcPhase('error');
+        }
+      } catch (err) {
+        if (isReading) setNfcPhase('error');
+      }
+    };
+
+    if (visible && mode === 'nfc' && nfcPhase === 'waiting') {
+      startNfcRead();
+    }
+
+    return () => {
+      isReading = false;
+      nfcService.stop();
+    };
+  }, [visible, mode, nfcPhase]);
 
   const handleClose = () => {
     if (countdownRef.current) clearInterval(countdownRef.current);
@@ -1099,20 +1161,26 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
     }, 1000);
   };
 
+  // Botão "Simular" mantido para quando você testar em Emulador sem NFC físico
   const handleSimulateNFC = () => { setNfcPhase('simulated_connected'); setTimeout(() => setNfcPhase('confirming'), 900); };
 
+  // 3. ENVIO FINAL PELO NFC
   const handleNFCConfirm = async () => {
     setNfcPhase('submitting');
     try {
-      const crachaAtual = await AsyncStorage.getItem('userCracha') ?? '0000';
-      await onSuccess(crachaAtual, 'NFC');
+      // Passamos o crachá do Almoxarife que foi lido pela Tag
+      const newId = await onSuccess(crachaAlmoxarife, 'NFC');
+      setSolicitacaoId(newId);
       setNfcPhase('done');
       Animated.spring(successScale, { toValue: 1, tension: 80, friction: 8, useNativeDriver: true }).start();
       startCountdown();
-    } catch { setNfcPhase('error'); }
+    } catch (e: any) { 
+      setManualError(e.message || 'Erro ao processar');
+      setNfcPhase('error'); 
+    }
   };
 
-  // ── Fluxo Manual: Colaborador informa apenas seu próprio crachá ───────────
+  // 4. ENVIO FINAL MANUAL
   const handleManualSubmit = async () => {
     if (!crachaAlmoxarife.trim()) {
       setManualError('Informe o ID do Almoxarife para enviar o pedido');
@@ -1122,8 +1190,8 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
       setSubmitting(true);
       setManualPhase('submitting');
       setManualError('');
-      // Envia o crachá do almoxarife para a função onSuccess
-      await onSuccess(crachaAlmoxarife.trim(), 'MANUAL'); 
+      const newId = await onSuccess(crachaAlmoxarife.trim(), 'MANUAL');
+      setSolicitacaoId(newId);
       setManualPhase('awaiting');
     } catch (e: any) {
       setManualError(e.message || 'Erro ao enviar solicitação');
@@ -1135,12 +1203,12 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
 
   const getNFCText = () => {
     switch (nfcPhase) {
-      case 'waiting': return { title: 'Aguardando NFC', sub: 'Aproxime o celular do leitor do Almoxarife', color: D.orange };
+      case 'waiting': return { title: 'Aguardando NFC', sub: 'Aproxime o celular do crachá do Almoxarife', color: D.orange };
       case 'simulated_connected': return { title: 'Leitor Detectado!', sub: 'Sincronizando lote…', color: D.orange };
       case 'confirming': return { title: 'Confirme a Solicitação', sub: 'Verifique os itens antes de enviar', color: D.orange };
       case 'submitting': return { title: 'Enviando…', sub: 'Aguardando resposta da API', color: D.amber };
       case 'done': return { title: 'Solicitação Enviada!', sub: `Encerrando em ${countdown}s…`, color: D.green };
-      case 'error': return { title: 'Erro no envio', sub: 'Tente via Identificação Manual', color: D.red };
+      case 'error': return { title: 'Erro na leitura', sub: manualError || 'Tente novamente ou use Manual', color: D.red };
     }
   };
 
@@ -1210,10 +1278,10 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
                   ))}
                 </View>
               )}
-              {nfcPhase === 'waiting' && (
+              {nfcPhase === 'waiting' && __DEV__ && (
                 <View style={nm.waitingSection}>
                   <TouchableOpacity style={nm.simBtn} onPress={handleSimulateNFC} activeOpacity={0.6}>
-                    <Text style={nm.simBtnText}>Simular Aproximação NFC</Text>
+                    <Text style={nm.simBtnText}>Simular Aproximação (Dev)</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -1231,10 +1299,17 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               )}
               {nfcPhase === 'error' && (
                 <View style={nm.errorCard}>
-                  <Text style={nm.errorText}>Falha no envio. Tente pelo modo Manual.</Text>
-                  <TouchableOpacity onPress={() => { setMode('manual'); setNfcPhase('waiting'); }} style={nm.errorSwitchBtn}>
-                    <Text style={nm.errorSwitchText}>Ir para Manual</Text>
-                  </TouchableOpacity>
+                  <Text style={nm.errorText}>{manualError || 'Falha no envio. Tente novamente.'}</Text>
+                  
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                    <TouchableOpacity onPress={() => { setMode('manual'); setNfcPhase('waiting'); }} style={[nm.errorSwitchBtn, { flex: 1, alignItems: 'center' }]}>
+                      <Text style={nm.errorSwitchText}>Ir para Manual</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity onPress={() => { setManualError(''); setNfcPhase('waiting'); }} style={[nm.errorSwitchBtn, { flex: 1, alignItems: 'center', borderColor: D.orange }]}>
+                      <Text style={[nm.errorSwitchText, { color: D.orange }]}>Tentar de Novo</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
               {nfcPhase === 'done' && (
@@ -1251,10 +1326,14 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
 
         {/* ── Fluxo Manual — Awaiting ── */}
         {mode === 'manual' && manualPhase === 'awaiting' && (
-          <AwaitingConfirmationScreen lote={lote} onClose={handleClose} />
+          <AwaitingConfirmationScreen
+            lote={lote}
+            solicitacaoId={solicitacaoId || 0}
+            onClose={handleClose}
+          />
         )}
 
-        {/* ── Fluxo Manual — Formulário (apenas crachá do colaborador) ── */}
+        {/* ── Fluxo Manual — Formulário ── */}
         {mode === 'manual' && manualPhase !== 'awaiting' && (
           <KeyboardAvoidingView style={nm.manualContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={nm.manualHeader}>
@@ -1275,7 +1354,6 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               ))}
             </View>
 
-            {/* Campo único: ID do Colaborador */}
             <View style={nm.manualInputWrap}>
               <View style={nm.manualInputLabelRow}>
                 <KeyAlmoxarifeIcon size={13} color={D.orange} />
@@ -1305,7 +1383,6 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
               </View>
             </View>
 
-            {/* Info box: fluxo explicado */}
             <View style={nm.flowInfoBox}>
               <View style={nm.flowStep}>
                 <View style={[nm.flowStepDot, { backgroundColor: D.orange }]} />
@@ -1328,11 +1405,9 @@ function LibModal({ visible, lote, onClose, onSuccess }: LibModalProps) {
             <TouchableOpacity
               style={[
                 nm.manualSubmitBtn,
-                // O botão fica desativado se estiver a enviar OU se o crachá do almoxarife estiver vazio
                 (submitting || !crachaAlmoxarife.trim()) && nm.manualSubmitBtnDisabled,
               ]}
               onPress={handleManualSubmit}
-              // Bloqueia o clique nas mesmas condições
               disabled={submitting || !crachaAlmoxarife.trim()}
               activeOpacity={0.88}
             >
@@ -1622,6 +1697,211 @@ const adv = StyleSheet.create({
   infoDesc: { fontSize: 11, color: D.iron, lineHeight: 16 },
 });
 
+interface DevolucaoModalProps {
+  visible: boolean;
+  ferramentas: Ferramenta[];
+  onClose: () => void;
+  onSubmit: (crachaAlmoxarife: string) => Promise<void>;
+}
+
+function DevolucaoModal({ visible, ferramentas, onClose, onSubmit }: DevolucaoModalProps) {
+  const [cracha, setCracha] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState('');
+
+  useEffect(() => {
+    if (visible) { setCracha(''); setErro(''); setLoading(false); }
+  }, [visible]);
+
+  if (!visible) return null;
+
+  const handleAction = async () => {
+    if (!cracha.trim()) { setErro('Informe o ID do Almoxarife'); return; }
+    try {
+      setLoading(true);
+      await onSubmit(cracha.trim());
+    } catch (e: any) {
+      setErro(e.message || 'Erro ao processar a devolução');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
+      <View style={nm.overlay} />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'center', padding: 22 }}>
+        <View style={{ backgroundColor: D.nfcBg, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: D.nfcBorder }}>
+          <View style={{ alignItems: 'center', marginBottom: 20 }}>
+            <BackIcon size={32} color={D.orange} />
+            <Text style={[nm.manualTitle, { marginTop: 12 }]}>Devolver Ferramentas</Text>
+            <Text style={nm.manualSub}>Entregue as ferramentas ao Almoxarife e digite o ID dele para confirmar a devolução.</Text>
+          </View>
+
+          <View style={[nm.manualLoteResume, { marginBottom: 16, maxHeight: 200 }]}>
+            <Text style={nm.manualLoteLabel}>ITENS A DEVOLVER ({ferramentas.length})</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {ferramentas.map(f => (
+                <View key={f.codigo} style={nm.manualLoteRow}>
+                  <View style={nm.itemDot} />
+                  <Text style={nm.manualLoteCode}>{f.codigo}</Text>
+                  <Text style={nm.manualLoteName} numberOfLines={1}>{f.nome}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+
+          <View style={nm.manualInputWrap}>
+            <View style={nm.manualInputLabelRow}>
+              <KeyAlmoxarifeIcon size={13} color={D.orange} />
+              <Text style={nm.manualInputLabel}>ID DO ALMOXARIFE</Text>
+            </View>
+            <View style={[nm.manualInput, { marginBottom: 10, marginTop: 6 }]}>
+              <KeyAlmoxarifeIcon size={16} color={D.orange} />
+              <TextInput
+                style={nm.manualInputText}
+                placeholder="Ex: 5012 (Quem está recebendo)"
+                placeholderTextColor="rgba(255,255,255,0.22)"
+                value={cracha}
+                onChangeText={v => { setCracha(v); setErro(''); }}
+                keyboardType="numeric"
+                editable={!loading}
+              />
+            </View>
+          </View>
+
+          {!!erro && (
+            <View style={[nm.manualError, { marginBottom: 14 }]}>
+              <XIcon size={12} color={D.redLight} />
+              <Text style={nm.manualErrorText}>{erro}</Text>
+            </View>
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+            <TouchableOpacity style={[nm.cancelBtn, { flex: 1, alignItems: 'center', justifyContent: 'center', height: 54 }]} onPress={onClose} disabled={loading}>
+              <Text style={nm.cancelText}>Cancelar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[nm.manualSubmitBtn, { flex: 2, height: 54 }, (!cracha.trim() || loading) && nm.manualSubmitBtnDisabled]}
+              onPress={handleAction}
+              disabled={!cracha.trim() || loading}
+            >
+              {loading ? <ActivityIndicator color={D.white} /> : <Text style={nm.manualSubmitText}>Confirmar</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+interface DevolucaoAprovacaoModalProps {
+  visible: boolean;
+  mov: any; // Dados da movimentação vindo da API
+  onClose: () => void;
+  onAprovar: (id: number, status: 'ok' | 'com_defeito', obs: string) => Promise<void>;
+  onRecusar: (id: number, motivo: string) => Promise<void>;
+}
+
+function DevolucaoAprovacaoModal({ visible, mov, onClose, onAprovar, onRecusar }: DevolucaoAprovacaoModalProps) {
+  const [checklist, setChecklist] = useState<'ok' | 'com_defeito'>('ok');
+  const [obs, setObs] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (visible) { setChecklist('ok'); setObs(''); setLoading(false); }
+  }, [visible]);
+
+  if (!visible || !mov) return null;
+
+  // O backend envia os relacionamentos, então pegamos os dados assim:
+  const ferramentaNome = mov.ferramenta?.nome || 'Ferramenta Desconhecida';
+  const ferramentaCodigo = mov.ferramenta?.codigo_patrimonio || '---';
+  const colaboradorNome = mov.usuario?.name || mov.usuario?.nome || 'Colaborador';
+
+  const handleAprovar = async () => {
+    setLoading(true);
+    try { await onAprovar(mov.id, checklist, obs); }
+    catch (e) { /* Erro tratado no toast da tela principal */ }
+    setLoading(false);
+  };
+
+  const handleRecusar = async () => {
+    setLoading(true);
+    try { await onRecusar(mov.id, obs || 'Recusado pelo almoxarife.'); }
+    catch (e) { /* Erro tratado no toast da tela principal */ }
+    setLoading(false);
+  };
+
+  return (
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
+      <View style={nm.overlay} />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'center', padding: 22 }}>
+        <View style={{ backgroundColor: D.nfcBg, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: D.nfcBorder }}>
+
+          <View style={{ alignItems: 'center', marginBottom: 20 }}>
+            <WrenchIcon size={32} color={D.orange} />
+            <Text style={[nm.manualTitle, { marginTop: 12, textAlign: 'center' }]}>Devolução Pendente</Text>
+            <Text style={nm.manualSub}>{colaboradorNome} está devolvendo esta ferramenta:</Text>
+          </View>
+
+          <View style={nm.itemsCard}>
+            <View style={nm.itemRow}>
+              <View style={nm.itemDot} />
+              <Text style={nm.itemCode}>{ferramentaCodigo}</Text>
+              <Text style={nm.itemName} numberOfLines={2}>{ferramentaNome}</Text>
+            </View>
+          </View>
+
+          <Text style={[nm.manualLoteLabel, { marginTop: 20, marginBottom: 8 }]}>CHECKLIST DE RECEBIMENTO</Text>
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+            <TouchableOpacity
+              style={[nm.modeToggle, { flex: 1, justifyContent: 'center', borderColor: checklist === 'ok' ? D.green : D.silver, backgroundColor: checklist === 'ok' ? D.greenBg : 'transparent' }]}
+              onPress={() => setChecklist('ok')}
+            >
+              <CheckIcon size={16} color={checklist === 'ok' ? D.green : D.slate} />
+              <Text style={[nm.modeToggleText, { color: checklist === 'ok' ? D.green : D.slate }]}>Tudo OK</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[nm.modeToggle, { flex: 1, justifyContent: 'center', borderColor: checklist === 'com_defeito' ? D.redLight : D.silver, backgroundColor: checklist === 'com_defeito' ? D.redBg : 'transparent' }]}
+              onPress={() => setChecklist('com_defeito')}
+            >
+              <XIcon size={16} color={checklist === 'com_defeito' ? D.redLight : D.slate} />
+              <Text style={[nm.modeToggleText, { color: checklist === 'com_defeito' ? D.redLight : D.slate }]}>Com Defeito</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={nm.manualInputWrap}>
+            <Text style={nm.manualInputLabel}>OBSERVAÇÃO / MOTIVO (OPCIONAL)</Text>
+            <View style={[nm.manualInput, { height: 'auto', paddingVertical: 10 }]}>
+              <TextInput
+                style={[nm.manualInputText, { minHeight: 40 }]}
+                placeholder="Ex: Voltou com a ponta gasta..."
+                placeholderTextColor="rgba(255,255,255,0.22)"
+                value={obs}
+                onChangeText={setObs}
+                multiline
+                editable={!loading}
+              />
+            </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+            <TouchableOpacity style={[nm.cancelBtn, { flex: 1, alignItems: 'center', justifyContent: 'center', height: 54, borderColor: D.redLight }]} onPress={handleRecusar} disabled={loading}>
+              <Text style={[nm.cancelText, { color: D.redLight, fontWeight: '700' }]}>Não Recebi</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[nm.manualSubmitBtn, { flex: 2, height: 54, backgroundColor: D.green }]} onPress={handleAprovar} disabled={loading}>
+              {loading ? <ActivityIndicator color={D.white} /> : <Text style={nm.manualSubmitText}>Confirmar Recebimento</Text>}
+            </TouchableOpacity>
+          </View>
+
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // ─── TELA PRINCIPAL ──────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════════
@@ -1631,6 +1911,9 @@ export default function AlmoxarifadoScreen() {
   const { naoLidas, startPolling, stopPolling } = useNotificacoes();
   const isAlmoxarife = user?.role === 'almoxarife';
   const isColaborador = !isAlmoxarife; // colaborador, admin sem papel especial, etc.
+  // Estados para a devolução do lado do Almoxarife
+  const [devPendenteAtual, setDevPendenteAtual] = useState<any>(null);
+  const [devAprovacaoVisible, setDevAprovacaoVisible] = useState(false);
 
   const [todasFerramentas, setTodasFerramentas] = useState<Ferramenta[]>([]);
   const [minhasFerramentas, setMinhasFerramentas] = useState<Ferramenta[]>([]);
@@ -1640,7 +1923,8 @@ export default function AlmoxarifadoScreen() {
   const [libModalVisible, setLibModalVisible] = useState(false);
   const [auditLogVisible, setAuditLogVisible] = useState(false);
   const [toastState, setToastState] = useState({ visible: false, msg: '', type: 'success' as 'success' | 'error' | 'info' });
-
+  // Adicione junto aos outros states, próximo da linha ~1163
+  const [devolucaoModalVisible, setDevolucaoModalVisible] = useState(false);
   const {
     solicitacaoAtual,
     modalVisible: solicitacaoModalVisible,
@@ -1653,6 +1937,33 @@ export default function AlmoxarifadoScreen() {
 
   const headerAnim = useRef(new Animated.Value(0)).current;
   const fabAnim = useRef(new Animated.Value(0)).current;
+
+  // RADAR DO ALMOXARIFE: Busca devoluções pendentes
+  useEffect(() => {
+    if (!isAlmoxarife) return;
+
+    let isChecking = false;
+    const interval = setInterval(async () => {
+      // Se já estiver com o modal aberto, não atrapalha
+      if (isChecking || devAprovacaoVisible) return;
+
+      isChecking = true;
+      try {
+        const pendentes = await apiClient.listarDevolucoesPendentes();
+        // Se a API retornou algo, abre o modal com a primeira ferramenta da fila
+        if (pendentes && pendentes.length > 0) {
+          setDevPendenteAtual(pendentes[0]);
+          setDevAprovacaoVisible(true);
+        }
+      } catch (e) {
+        // Ignora erros de rede silenciosamente
+      } finally {
+        isChecking = false;
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [isAlmoxarife, devAprovacaoVisible]);
 
   useEffect(() => {
     Animated.timing(headerAnim, { toValue: 1, duration: 480, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
@@ -1713,6 +2024,30 @@ export default function AlmoxarifadoScreen() {
     }
   };
 
+  const handleAprovarDevolucao = async (id: number, status: 'ok' | 'com_defeito', obs: string) => {
+    try {
+      await apiClient.confirmarDevolucao(id, status, obs);
+      showToast('Devolução confirmada com sucesso!', 'success');
+      setDevAprovacaoVisible(false);
+      setDevPendenteAtual(null);
+      loadData(); // Atualiza a tela do Almoxarife
+    } catch (e: any) {
+      showToast(e.message || 'Erro ao confirmar', 'error');
+    }
+  };
+
+  const handleRecusarDevolucao = async (id: number, motivo: string) => {
+    try {
+      await apiClient.recusarDevolucao(id, motivo);
+      showToast('Devolução recusada.', 'info');
+      setDevAprovacaoVisible(false);
+      setDevPendenteAtual(null);
+      loadData();
+    } catch (e: any) {
+      showToast(e.message || 'Erro ao recusar', 'error');
+    }
+  };
+
   const addToLote = useCallback((ferramenta: Ferramenta) => {
     setLote(prev => {
       if (prev.find(i => i.codigo === ferramenta.codigo)) return prev;
@@ -1734,47 +2069,60 @@ export default function AlmoxarifadoScreen() {
    * Almoxarife nunca deve chegar aqui via UI normal (FAB oculto),
    * mas adicionamos um guard explícito como segunda camada de defesa.
    */
-  const handleLibSuccess = async (crachaAlmoxarife: string, metodo: 'NFC' | 'MANUAL') => {
-    // ── GUARD: Almoxarife não pode retirar ferramentas para si mesmo ─────────
-    if (isAlmoxarife) {
-      throw new Error('Almoxarife não pode solicitar ferramentas para si mesmo. Apenas colaboradores podem pedir; o almoxarife aprova.');
-    }
+  const handleLibSuccess = async (crachaAlmoxarife: string, metodo: 'NFC' | 'MANUAL'): Promise<number> => {
+    if (isAlmoxarife) throw new Error('Almoxarife não pode solicitar.');
 
-    // NOVIDADE: Em vez de chamar .retirar(), chamamos .criarSolicitacao()
-    await apiClient.criarSolicitacao({
+    const response = await apiClient.criarSolicitacao({
       cracha_almoxarife: crachaAlmoxarife,
-      ferramentas: lote.map(f => ({ 
-        codigo: f.codigo, 
-        qtd: f.qty, 
-        checklist: 'REALIZADO', 
-        observacao: 'Solicitação via app Marilan' 
+      ferramentas: lote.map(f => ({
+        codigo: f.codigo,
+        qtd: f.qty,
+        checklist: 'REALIZADO',
+        observacao: 'Solicitação via app Marilan'
       })),
     });
 
-    // Registamos a intenção de retirada no histórico local do telemóvel
     const crachaAtual = await AsyncStorage.getItem('userCracha') ?? 'DESCONHECIDO';
     const log: AuditLog = {
       id: genId(),
       timestamp: Date.now(),
-      acao: 'RETIRADA', // Nota: Poderias mudar para 'SOLICITACAO' se preferires no futuro
+      acao: 'RETIRADA',
       ferramentas: lote.map(f => ({ codigo: f.codigo, nome: f.nome, qty: f.qty })),
-      responsavel: crachaAtual, 
+      responsavel: crachaAtual,
       autorizador: 'PENDENTE_APROVACAO',
       metodo,
     };
     await saveAuditLog(log);
 
-    // Esvaziamos o carrinho do colaborador, pois o pedido já foi enviado
-    setLote([]);
-    showToast(`✅ Solicitação enviada · Aguardando Almoxarife`, 'success');
-    await loadData();
+    // ❌ APAGAMOS O setLote([]) E O showToast DAQUI! A lista vai continuar na tela!
+
+    // Retornamos o ID gerado pelo banco para a tela de espera
+    return response.solicitacao.id;
   };
 
-  const handleDevolver = () => showToast('Fluxo de devolução em desenvolvimento', 'info');
+  const handleDevolver = () => setDevolucaoModalVisible(true);
+
+  // Adicione a função que vai conversar com a API
+  const handleConfirmarDevolucao = async (crachaAlmoxarife: string) => {
+    const crachaColab = await AsyncStorage.getItem('userCracha');
+    if (!crachaColab) throw new Error("ID do colaborador não encontrado");
+
+    // Nova requisição (passando apenas o código e o crachá do colaborador)
+    await apiClient.solicitarDevolucao({
+      cracha_colaborador: crachaColab,
+      ferramentas: minhasFerramentas
+        .filter(f => !f.aguardandoDevolucao) // Só manda o que já não tá pendente
+        .map(f => ({ codigo: f.codigo }))
+    });
+
+    showToast(`Solicitação enviada ao Almoxarife!`, 'success');
+    setDevolucaoModalVisible(false);
+    loadData(); // Vai recarregar e a etiqueta "AGUARDANDO ALMOXARIFE" vai aparecer!
+  };
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastState({ visible: true, msg, type });
-    setTimeout(() => setToastState(s => ({ ...s, visible: false })), 3800);
+    setTimeout(() => setToastState(prev => ({ ...prev, visible: false })), 3200);
   };
 
   const isInLote = (codigo: string) => lote.some(i => i.codigo === codigo);
@@ -1879,12 +2227,37 @@ export default function AlmoxarifadoScreen() {
         <LibModal
           visible={libModalVisible}
           lote={lote}
-          onClose={() => setLibModalVisible(false)}
+          onClose={() => {
+            setLibModalVisible(false);
+            setLote([]); // ✅ Limpa o carrinho só quando a janela fecha
+            loadData();  // ✅ Atualiza as ferramentas na tela principal
+          }}
           onSuccess={handleLibSuccess}
         />
       )}
 
       <AuditLogModal visible={auditLogVisible} onClose={() => setAuditLogVisible(false)} />
+
+      {/* Modal de Devolução (Aprovação/Checklist) — só Almoxarife recebe */}
+      {isAlmoxarife && (
+        <DevolucaoAprovacaoModal
+          visible={devAprovacaoVisible}
+          mov={devPendenteAtual}
+          onClose={() => setDevAprovacaoVisible(false)}
+          onAprovar={handleAprovarDevolucao}
+          onRecusar={handleRecusarDevolucao}
+        />
+      )}
+
+      {/* Modal de devolução — só colaborador pode abrir */}
+      {isColaborador && (
+        <DevolucaoModal
+          visible={devolucaoModalVisible}
+          ferramentas={minhasFerramentas}
+          onClose={() => setDevolucaoModalVisible(false)}
+          onSubmit={handleConfirmarDevolucao}
+        />
+      )}
 
       {/* Modal de aprovação — só almoxarife recebe via polling */}
       <SolicitacaoModal
@@ -1900,6 +2273,8 @@ export default function AlmoxarifadoScreen() {
       <Toast message={toastState.msg} visible={toastState.visible} type={toastState.type} />
     </View>
   );
+
+
 }
 
 const s = StyleSheet.create({

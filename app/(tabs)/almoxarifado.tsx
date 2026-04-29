@@ -44,6 +44,8 @@ import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop } from 'react
 import { apiClient } from '../../services/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useSolicitacoesListener } from '../../hooks/useSolicitacoesListener';
+import { useNotificacoes } from '@/hooks/useNotificacoes';
+import { HeaderNotificationButton } from '@/components/HeaderNotificationButton';
 import { SolicitacaoModal } from '../../components/SolicitacaoModal';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -1614,6 +1616,7 @@ const adv = StyleSheet.create({
 export default function AlmoxarifadoScreen() {
   // ── Role — fonte única de verdade ─────────────────────────────────────────
   const { user, isLoading: authLoading } = useAuth();
+  const { naoLidas, startPolling, stopPolling } = useNotificacoes();
   const isAlmoxarife = user?.role === 'almoxarife';
   const isColaborador = !isAlmoxarife; // colaborador, admin sem papel especial, etc.
 
@@ -1642,7 +1645,12 @@ export default function AlmoxarifadoScreen() {
   useEffect(() => {
     Animated.timing(headerAnim, { toValue: 1, duration: 480, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
     loadData();
-  }, []);
+    startPolling();
+
+    return () => {
+      stopPolling();
+    };
+  }, [startPolling, stopPolling]);
 
   useEffect(() => {
     // FAB só faz sentido para colaborador
@@ -1779,6 +1787,7 @@ export default function AlmoxarifadoScreen() {
               <Text style={s.headerSub}>{headerSubtitle}</Text>
             </View>
             <View style={s.headerRight}>
+              <HeaderNotificationButton count={naoLidas} size={22} color="rgba(255,255,255,0.85)" />
               {/* Botão de Auditoria só para almoxarife no header */}
               {isAlmoxarife && (
                 <TouchableOpacity style={s.auditBtn} onPress={() => setAuditLogVisible(true)} activeOpacity={0.7}>

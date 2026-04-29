@@ -38,6 +38,7 @@ import { nfcService } from '../../services/nfc';
 import { useAuth } from '@/hooks/useAuth';
 import { useNotificacoes } from '@/hooks/useNotificacoes';
 import { HeaderNotificationButton } from '@/components/HeaderNotificationButton';
+import { TrocaConfirmacaoModal } from '@/components/TrocaConfirmacaoModal';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -248,7 +249,7 @@ function TrocaSuccessModal({
   visible, ferramenta, outroNome, tipo, onClose,
 }: {
   visible: boolean; ferramenta: string; outroNome: string;
-  tipo: 'enviou' | 'recebeu'; onClose: () => void;
+  tipo: 'enviou' | 'recebeu' | 'solicitou'; onClose: () => void;
 }) {
   const bgOp      = useRef(new Animated.Value(0)).current;
   const cardY     = useRef(new Animated.Value(60)).current;
@@ -279,6 +280,7 @@ function TrocaSuccessModal({
   };
 
   const isRecebeu = tipo === 'recebeu';
+  const isSolicitou = tipo === 'solicitou';
 
   return (
     <Modal transparent visible={visible} animationType="none" statusBarTranslucent onRequestClose={onClose}>
@@ -293,13 +295,15 @@ function TrocaSuccessModal({
             </Svg>
           </View>
         </Animated.View>
-        <View style={[tsm.badge, isRecebeu && tsm.badgeOrange]}>
-          <View style={[tsm.badgeDot, isRecebeu && tsm.badgeDotOrange]} />
-          <Text style={[tsm.badgeText, isRecebeu && tsm.badgeTextOrange]}>
-            {isRecebeu ? 'FERRAMENTA RECEBIDA' : 'TRANSFERÊNCIA CONCLUÍDA'}
+        <View style={[tsm.badge, (isRecebeu || isSolicitou) && tsm.badgeOrange]}>
+          <View style={[tsm.badgeDot, (isRecebeu || isSolicitou) && tsm.badgeDotOrange]} />
+          <Text style={[tsm.badgeText, (isRecebeu || isSolicitou) && tsm.badgeTextOrange]}>
+            {isRecebeu ? 'FERRAMENTA RECEBIDA' : isSolicitou ? 'SOLICITAÇÃO ENVIADA' : 'TRANSFERÊNCIA CONCLUÍDA'}
           </Text>
         </View>
-        <Text style={tsm.title}>{isRecebeu ? 'Você recebeu uma\nferramenta!' : 'Transferência\nrealizada!'}</Text>
+        <Text style={tsm.title}>
+          {isRecebeu ? 'Você recebeu uma\nferramenta!' : isSolicitou ? 'Solicitação\nenviada!' : 'Transferência\nrealizada!'}
+        </Text>
         <View style={tsm.detailCard}>
           <View style={tsm.detailRow}>
             <View style={tsm.detailIconBox}><WrenchIcon size={15} color={D.orange} /></View>
@@ -312,7 +316,9 @@ function TrocaSuccessModal({
           <View style={tsm.detailRow}>
             <View style={tsm.detailIconBox}><UserIcon size={15} color={D.orange} /></View>
             <View style={{ flex: 1 }}>
-              <Text style={tsm.detailLabel}>{isRecebeu ? 'ENVIADO POR' : 'ENVIADO PARA'}</Text>
+              <Text style={tsm.detailLabel}>
+                {isRecebeu ? 'ENVIADO POR' : isSolicitou ? 'SOLICITADO DE' : 'ENVIADO PARA'}
+              </Text>
               <Text style={tsm.detailValue}>{outroNome}</Text>
             </View>
           </View>
@@ -349,27 +355,41 @@ const tsm = StyleSheet.create({
   btnText: { fontSize: 16, fontWeight: '800', color: D.white, letterSpacing: 0.2 },
 });
 
-// ─── Hook: polling para quem recebeu a ferramenta ─────────────────────────────
-function useTrocaRecebidaListener() {
-  const [trocaRecebida, setTrocaRecebida] = useState<{ ferramenta: string; deNome: string } | null>(null);
+// ─── Hook: polling para solicitações de troca recebidas ─────────────────────
+function useTrocaRecebidaListener(user: any) {
+  const [solicitacaoRecebida, setSolicitacaoRecebida] = useState<{
+    id: number;
+    ferramenta_nome: string;
+    ferramenta_codigo: string;
+    solicitante_nome: string;
+    solicitante_cracha: string;
+    criado_em: string;
+  } | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const intervaloRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const buscandoRef  = useRef(false);
 
   useEffect(() => {
+    if (user?.role !== 'colaborador') return;
+
     const verificar = async () => {
       if (buscandoRef.current) return;
       buscandoRef.current = true;
       try {
-        const cracha = await AsyncStorage.getItem('userCracha');
-        if (!cracha) return;
-        const response = await apiClient.verificarTrocaRecebida(cracha);
+        const response = await apiClient.verificarTrocaRecebida(user.cracha);
         if (response) {
-          setTrocaRecebida({ ferramenta: response.ferramenta_nome, deNome: response.de_nome });
+          setSolicitacaoRecebida({
+            id: response.id,
+            ferramenta_nome: response.ferramenta_nome,
+            ferramenta_codigo: response.ferramenta_codigo,
+            solicitante_nome: response.de_nome,
+            solicitante_cracha: response.de_cracha,
+            criado_em: response.criado_em,
+          });
           setModalVisible(true);
         }
-      } catch {
-        // silencioso
+      } catch (error) {
+        console.error('Erro ao verificar troca:', error);
       } finally {
         buscandoRef.current = false;
       }
@@ -378,36 +398,53 @@ function useTrocaRecebidaListener() {
     verificar();
     intervaloRef.current = setInterval(verificar, 8000);
     return () => { if (intervaloRef.current) clearInterval(intervaloRef.current); };
-  }, []);
+  }, [user]);
+
+  const aceitar = async () => {
+    if (!solicitacaoRecebida || !user) return;
+    await apiClient.aceitarTroca(user.cracha, solicitacaoRecebida.ferramenta_codigo);
+  };
+
+  const recusar = async () => {
+    // For now, just close. In future, add reject API
+    await new Promise(resolve => setTimeout(resolve, 500));
+  };
 
   const fechar = async () => {
     try {
-      const cracha = await AsyncStorage.getItem('userCracha');
-      if (cracha) await apiClient.confirmarVisualizacaoTroca(cracha);
+      if (user) await apiClient.confirmarVisualizacaoTroca(user.cracha);
     } catch {}
     setModalVisible(false);
-    setTrocaRecebida(null);
+    setSolicitacaoRecebida(null);
   };
 
-  return { trocaRecebida, modalVisible, fechar };
+  return { solicitacaoRecebida, modalVisible, aceitar, recusar, fechar };
 }
 
-// ─── Swap Modal ────────────────────────────────────────────────────────────────
-function SwapModal({ visible, tool, onClose, onSuccess }: {
+// ─── Solicitar Troca Modal ────────────────────────────────────────────────────
+function SolicitarTrocaModal({ visible, tool, onClose, onSuccess, user }: {
   visible: boolean; tool: Ferramenta | null;
-  onClose: () => void; onSuccess: (codigo: string, paraNome: string) => void;
+  onClose: () => void; onSuccess: (codigo: string) => void; user: any;
 }) {
-  const [cracha, setCracha] = useState('');
-  const [obs, setObs] = useState('');
+  const [ownerBadge, setOwnerBadge] = useState('');
+  const [requesterBadge, setRequesterBadge] = useState('');
   const [loading, setLoading] = useState(false);
   const slideY = useRef(new Animated.Value(400)).current;
   const bgOp = useRef(new Animated.Value(0)).current;
   const btnScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (visible) {
-      setCracha(''); setObs(''); setLoading(false);
-      nfcService.readTag().catch(() => {});
+    if (visible && tool && user) {
+      setOwnerBadge(''); setLoading(false);
+      setRequesterBadge(user.cracha);
+      // Tentar extrair crachá do dono da ferramenta
+      if (tool.alocadoPara) {
+        // Assumindo que alocadoPara é algo como "JOÃO (1234)" ou só "1234"
+        const match = tool.alocadoPara.match(/(\d+)/);
+        if (match) {
+          setOwnerBadge(match[1]);
+        }
+      }
       Animated.parallel([
         Animated.spring(slideY, { toValue: 0, tension: 68, friction: 13, useNativeDriver: true }),
         Animated.timing(bgOp, { toValue: 1, duration: 280, useNativeDriver: true }),
@@ -415,10 +452,9 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
     } else {
       slideY.setValue(400); bgOp.setValue(0);
     }
-  }, [visible]);
+  }, [visible, tool, user]);
 
   const close = () => {
-    nfcService.stop();
     Animated.parallel([
       Animated.timing(slideY, { toValue: 400, duration: 260, useNativeDriver: true }),
       Animated.timing(bgOp, { toValue: 0, duration: 220, useNativeDriver: true }),
@@ -426,28 +462,26 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
   };
 
   const submit = async () => {
-    if (!cracha.trim() || !tool) return;
+    if (!tool || !ownerBadge.trim()) return;
     Animated.sequence([
       Animated.timing(btnScale, { toValue: 0.97, duration: 70, useNativeDriver: true }),
       Animated.spring(btnScale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
     ]).start();
     try {
       setLoading(true);
-      await apiClient.trocar({
-        cracha_novo_colaborador: cracha.trim(),
-        ferramentas: [{ codigo: tool.codigo, qtd: 1, checklist: 'REALIZADO', observacao: obs.trim() || 'Troca via app' }],
-      });
+      await apiClient.solicitarTroca(requesterBadge, ownerBadge.trim(), tool.codigo);
       close();
-      setTimeout(() => onSuccess(tool.nome, cracha.trim()), 320);
+      setTimeout(() => onSuccess(tool.nome), 320);
     } catch (e: any) {
-      Alert.alert('Erro', e.message || 'Falha ao transferir');
+      Alert.alert('Erro', e.message || 'Falha ao solicitar troca');
     } finally {
       setLoading(false);
     }
   };
 
+  const canSubmit = ownerBadge.trim().length > 0 && !loading;
+
   if (!tool) return null;
-  const canSubmit = cracha.trim().length > 0 && !loading;
 
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={close}>
@@ -456,50 +490,63 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
       </Animated.View>
       <Animated.View style={[ms.sheet, { transform: [{ translateY: slideY }] }]}>
         <View style={ms.handle} />
-        <View style={ms.toolRow}>
-          <View style={ms.toolIconBox}><WrenchIcon size={20} color={D.orange} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={ms.toolName} numberOfLines={1}>{tool.nome}</Text>
-            <Text style={ms.toolMeta}>{tool.categoria} · {tool.codigo}</Text>
+        <View style={ms.header}>
+          <View style={ms.headerIcon}>
+            <WrenchIcon size={20} color={D.white} />
           </View>
-          <TouchableOpacity onPress={close} style={ms.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <XIcon size={14} />
-          </TouchableOpacity>
+          <Text style={ms.headerTitle}>Solicitar Troca</Text>
+          <Text style={ms.headerSub}>Solicite esta ferramenta do colega</Text>
         </View>
         <View style={ms.sep} />
         <View style={ms.body}>
-          <NFCPulse active={true} />
-          <Text style={ms.title}>Transferir Ferramenta</Text>
-          <Text style={ms.sub}>Insira o crachá do colaborador{'\n'}que receberá esta ferramenta</Text>
+          <Text style={ms.title}>Solicitar Ferramenta</Text>
+          <Text style={ms.sub}>Confirme os dados para solicitar{'\n'}a ferramenta</Text>
+          
+          {/* Tool Info */}
+          <View style={ms.toolCard}>
+            <View style={ms.toolRow}>
+              <View style={ms.toolIconBox}>
+                <WrenchIcon size={16} color={D.orange} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={ms.toolName} numberOfLines={1}>{tool.nome}</Text>
+                <Text style={ms.toolMeta}>Código: {tool.codigo}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Requester Badge - Read Only */}
           <View style={ms.inputWrap}>
             <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
-              <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.orange} strokeWidth={1.8} />
-              <Circle cx={9} cy={12} r={2.5} stroke={D.orange} strokeWidth={1.6} />
-              <Path d="M14 10h4M14 14h3" stroke={D.orange} strokeWidth={1.5} strokeLinecap="round" />
+              <Rect x={2} y={5} width={20} height={14} rx={2} stroke={D.gray300} strokeWidth={1.8} />
+              <Circle cx={9} cy={12} r={2.5} stroke={D.gray300} strokeWidth={1.6} />
+              <Path d="M14 10h4M14 14h3" stroke={D.gray300} strokeWidth={1.5} strokeLinecap="round" />
+            </Svg>
+            <TextInput
+              style={[ms.input, { color: D.gray500 }]}
+              placeholder="Seu crachá"
+              value={requesterBadge}
+              editable={false}
+            />
+          </View>
+
+          {/* Owner Badge */}
+          <View style={ms.inputWrap}>
+            <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
+              <Circle cx={12} cy={8} r={4} stroke={D.orange} strokeWidth={1.8} />
+              <Path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke={D.orange} strokeWidth={1.8} strokeLinecap="round" />
             </Svg>
             <TextInput
               style={ms.input}
-              placeholder="Crachá do colaborador"
+              placeholder="Crachá do colega (dono)"
               placeholderTextColor={D.gray300}
-              value={cracha}
-              onChangeText={setCracha}
+              value={ownerBadge}
+              onChangeText={setOwnerBadge}
               keyboardType="numeric"
               autoCorrect={false}
             />
           </View>
-          <View style={[ms.inputWrap, { height: 52 }]}>
-            <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
-              <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke={D.gray300} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-            </Svg>
-            <TextInput
-              style={[ms.input, { paddingTop: 0 }]}
-              placeholder="Observação (opcional)"
-              placeholderTextColor={D.gray300}
-              value={obs}
-              onChangeText={setObs}
-              autoCapitalize="sentences"
-            />
-          </View>
+
           <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }] }}>
             <TouchableOpacity
               style={[ms.confirmBtn, !canSubmit && ms.confirmBtnDisabled]}
@@ -511,7 +558,7 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
                 ? <ActivityIndicator color={D.white} size="small" />
                 : (
                   <>
-                    <Text style={[ms.confirmText, !canSubmit && ms.confirmTextDisabled]}>Confirmar Transferência</Text>
+                    <Text style={[ms.confirmText, !canSubmit && ms.confirmTextDisabled]}>Solicitar Troca</Text>
                     <ArrowRight color={canSubmit ? D.white : D.gray400} />
                   </>
                 )
@@ -527,6 +574,10 @@ const ms = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(26,21,16,0.5)' },
   sheet: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: D.white, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingBottom: Platform.OS === 'ios' ? 50 : 36, shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 20 },
   handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: D.gray200, alignSelf: 'center', marginTop: 12, marginBottom: 6 },
+  header: { paddingHorizontal: 24, paddingVertical: 16, alignItems: 'center', gap: 8 },
+  headerIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: D.orange, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 20, fontWeight: '900', color: D.black, letterSpacing: -0.3 },
+  headerSub: { fontSize: 14, color: D.gray500, textAlign: 'center' },
   toolRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingVertical: 14 },
   toolIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center' },
   toolName: { fontSize: 15, fontWeight: '800', color: D.black, letterSpacing: -0.1 },
@@ -534,6 +585,7 @@ const ms = StyleSheet.create({
   closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: D.gray100, alignItems: 'center', justifyContent: 'center' },
   sep: { height: 1, backgroundColor: D.gray100 },
   body: { paddingHorizontal: 24, paddingTop: 24, alignItems: 'center', gap: 14 },
+  toolCard: { width: '100%', backgroundColor: D.gray50, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: D.gray200, marginBottom: 8 },
   title: { fontSize: 22, fontWeight: '900', color: D.black, letterSpacing: -0.3, textAlign: 'center' },
   sub: { fontSize: 14, color: D.gray500, textAlign: 'center', lineHeight: 22, marginBottom: 4 },
   inputWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%', height: 56, borderRadius: 14, borderWidth: 1.5, borderColor: D.gray200, backgroundColor: D.gray50, paddingHorizontal: 16 },
@@ -581,18 +633,19 @@ const fc = StyleSheet.create({
  * canTransfer: boolean — passa `true` só para colaboradores.
  * Almoxarife vê o mesmo card mas sem o accent vermelho e sem o hint de "toque p/ transferir".
  */
-function ToolCard({ item, index, onPress, canTransfer }: {
+function ToolCard({ item, index, onPress, onSolicitar, canTransfer }: {
   item: Ferramenta; index: number;
   onPress: (f: Ferramenta) => void;
+  onSolicitar: (f: Ferramenta) => void;
   canTransfer: boolean;
 }) {
   const oy = useRef(new Animated.Value(16)).current;
   const op = useRef(new Animated.Value(0)).current;
   const sc = useRef(new Animated.Value(1)).current;
 
-  // Ferramenta "Em uso" só é interativa se o usuário pode transferir
+  // Ferramenta "Em uso" só mostra botão solicitar, não é clicável
   const isInUse = item.status === 'Em uso';
-  const isInteractive = isInUse && canTransfer;
+  const isInteractive = !isInUse && canTransfer; // Só clicável se não estiver em uso
 
   useEffect(() => {
     Animated.parallel([
@@ -617,8 +670,8 @@ function ToolCard({ item, index, onPress, canTransfer }: {
         onPress={press}
         activeOpacity={isInteractive ? 0.92 : 1}
       >
-        {/* Accent bar vermelho só para colaborador com ferramenta em uso */}
-        {isInteractive && <View style={tc.accent} />}
+        {/* Accent bar vermelho só para colaborador com ferramenta não em uso */}
+        {!isInUse && isInteractive && <View style={tc.accent} />}
 
         <View style={[tc.iconBox, isInUse && tc.iconBoxRed]}>
           <WrenchIcon size={18} color={isInUse ? D.red : D.orange} />
@@ -635,12 +688,18 @@ function ToolCard({ item, index, onPress, canTransfer }: {
             <Text style={tc.cat}>{item.categoria}</Text>
           </View>
 
-          {/* Linha de alocação + hint de troca — só colaborador */}
+          {/* Linha de alocação + botão solicitar — só colaborador */}
           {isInUse && item.alocadoPara && canTransfer && (
             <View style={tc.allocRow}>
               <UserIcon size={11} color={D.red} />
               <Text style={tc.allocText}>{item.alocadoPara}</Text>
-              <Text style={tc.tapHint}>Toque para transferir →</Text>
+              <TouchableOpacity 
+                style={tc.solicitarBtn}
+                onPress={() => onSolicitar(item)}
+                activeOpacity={0.8}
+              >
+                <Text style={tc.solicitarText}>Solicitar Troca</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -657,7 +716,7 @@ function ToolCard({ item, index, onPress, canTransfer }: {
           )}
         </View>
 
-        {/* Seta de ação só para colaborador interativo */}
+        {/* Seta de ação só para colaborador interativo (não em uso) */}
         {isInteractive && <ChevronIcon color={D.red + '60'} />}
       </TouchableOpacity>
     </Animated.View>
@@ -679,6 +738,8 @@ const tc = StyleSheet.create({
   cat: { fontSize: 11, color: D.gray500, fontWeight: '500' },
   allocRow: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: D.redBg, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 7, alignSelf: 'flex-start' },
   allocText: { fontSize: 11, fontWeight: '700', color: D.red },
+  solicitarBtn: { backgroundColor: D.orange, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 'auto' },
+  solicitarText: { fontSize: 10, fontWeight: '700', color: D.white },
   tapHint: { fontSize: 10, color: `${D.red}70`, fontStyle: 'italic' },
   // Badge read-only para almoxarife
   readOnlyBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: D.gray100, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
@@ -713,14 +774,15 @@ export default function FerramentasScreen() {
   const [filter, setFilter] = useState<string>('Todos');
   const [selected, setSelected] = useState<Ferramenta | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [solicitarModalVisible, setSolicitarModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ visible: false, msg: '' });
 
   const [trocaEnviada, setTrocaEnviada] = useState<{ ferramenta: string; paraNome: string } | null>(null);
   const [successModalVisible, setSuccessModalVisible] = useState(false);
 
-  // Polling de troca recebida — válido para colaborador (almoxarife não recebe P2P)
-  const { trocaRecebida, modalVisible: recebidaVisible, fechar: fecharRecebida } = useTrocaRecebidaListener();
+  // Polling de solicitação de troca recebida — válido para colaborador
+  const { solicitacaoRecebida, modalVisible: recebidaVisible, aceitar: aceitarTroca, recusar: recusarTroca, fechar: fecharRecebida } = useTrocaRecebidaListener(user);
 
   const headerAnim = useRef(new Animated.Value(0)).current;
   const statAnim1 = useRef(new Animated.Value(0)).current;
@@ -782,6 +844,13 @@ export default function FerramentasScreen() {
     if (!canTransfer) return;
     setSelected(t);
     setModalVisible(true);
+  };
+
+  const handleSolicitarPress = (t: Ferramenta) => {
+    // Guard: só colaborador pode solicitar
+    if (!canTransfer) return;
+    setSelected(t);
+    setSolicitarModalVisible(true);
   };
 
   const headerTY = headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] });
@@ -863,6 +932,7 @@ export default function FerramentasScreen() {
                 item={item}
                 index={index}
                 onPress={handleCardPress}
+                onSolicitar={handleSolicitarPress}
                 canTransfer={canTransfer}
               />
             )}
@@ -879,41 +949,44 @@ export default function FerramentasScreen() {
         )}
       </View>
 
-      {/* Modal de transferência — só renderiza para colaborador */}
+      {/* Modal de solicitação de troca — só renderiza para colaborador */}
       {canTransfer && (
-        <SwapModal
-          visible={modalVisible}
+        <SolicitarTrocaModal
+          visible={solicitarModalVisible}
           tool={selected}
-          onClose={() => { setModalVisible(false); setTimeout(() => setSelected(null), 400); }}
-          onSuccess={(ferramenta, paraNome) => {
-            setTrocaEnviada({ ferramenta, paraNome });
+          onClose={() => setSolicitarModalVisible(false)}
+          onSuccess={(ferramenta) => {
+            setTrocaEnviada({ ferramenta, paraNome: 'Solicitação enviada' });
             setSuccessModalVisible(true);
             setTimeout(load, 900);
           }}
+          user={user}
         />
       )}
 
-      {/* Confirmação — quem ENVIOU (colaborador) */}
+      {/* Confirmação — quem ENVIOU solicitação (colaborador) */}
       {canTransfer && (
         <TrocaSuccessModal
           visible={successModalVisible}
           ferramenta={trocaEnviada?.ferramenta ?? ''}
           outroNome={trocaEnviada?.paraNome ?? ''}
-          tipo="enviou"
+          tipo="solicitou"
           onClose={() => { setSuccessModalVisible(false); setTrocaEnviada(null); }}
         />
       )}
 
-      {/* Confirmação — quem RECEBEU via polling (colaborador) */}
+      {/* Confirmação de solicitação de troca recebida (colaborador) */}
       {canTransfer && (
-        <TrocaSuccessModal
+        <TrocaConfirmacaoModal
           visible={recebidaVisible}
-          ferramenta={trocaRecebida?.ferramenta ?? ''}
-          outroNome={trocaRecebida?.deNome ?? ''}
-          tipo="recebeu"
+          solicitacao={solicitacaoRecebida}
+          onAceitar={async () => { await aceitarTroca(); load(); }}
+          onRecusar={async () => { await recusarTroca(); load(); }}
           onClose={fecharRecebida}
         />
       )}
+
+
 
       <Toast message={toast.msg} visible={toast.visible} />
     </View>

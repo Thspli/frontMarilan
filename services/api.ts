@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance } from 'axios';
 import * as FileSystem from 'expo-file-system';
 
-const API_BASE_URL = 'https://entry-atm-jackson-suggestion.trycloudflare.com/api';
+const API_BASE_URL = 'https://tool-blah-benz-plays.trycloudflare.com/api';
 
 interface LoginRequest {
   cracha: string;
@@ -268,7 +268,14 @@ async recusarSolicitacao(id: number): Promise<any> {
     throw new Error(this.extractErrorMessage(error));
   }
 }
-async verificarTrocaRecebida(cracha: string): Promise<{ ferramenta_nome: string; de_nome: string } | null> {
+async verificarTrocaRecebida(cracha: string): Promise<{ 
+  id: number;
+  ferramenta_nome: string; 
+  ferramenta_codigo: string;
+  de_nome: string;
+  de_cracha: string;
+  criado_em: string;
+} | null> {
   try {
     const response = await this.api.get(`/trocas/recebidas/pendente?cracha=${encodeURIComponent(cracha)}`);
     return response.data ?? null;
@@ -280,7 +287,41 @@ async verificarTrocaRecebida(cracha: string): Promise<{ ferramenta_nome: string;
 async confirmarVisualizacaoTroca(cracha: string): Promise<void> {
   try {
     await this.api.post('/trocas/recebidas/visualizar', { cracha });
-  } catch {}
+  } catch {
+    if (__DEV__) {
+      console.log('Mock: Confirmando visualização da troca');
+    }
+  }
+}
+
+async aceitarTroca(cracha: string, ferramentaCodigo: string): Promise<any> {
+  try {
+    const response = await this.api.post('/trocas/aceitar', { cracha, ferramenta_codigo: ferramentaCodigo });
+    return response.data;
+  } catch (error) {
+    if (__DEV__) {
+      console.log('Mock: Aceitando troca da ferramenta', ferramentaCodigo);
+      return { success: true };
+    }
+    throw new Error(this.extractErrorMessage(error));
+  }
+}
+
+async solicitarTroca(crachaSolicitante: string, crachaDono: string, ferramentaCodigo: string): Promise<any> {
+  try {
+    const response = await this.api.post('/trocas/solicitar', { 
+      cracha_solicitante: crachaSolicitante, 
+      cracha_dono: crachaDono,
+      ferramenta_codigo: ferramentaCodigo 
+    });
+    return response.data;
+  } catch (error) {
+    if (__DEV__) {
+      console.log('Mock: Solicitando troca da ferramenta', ferramentaCodigo, 'de', crachaDono, 'para', crachaSolicitante);
+      return { success: true };
+    }
+    throw new Error(this.extractErrorMessage(error));
+  }
 }
   /**
    * Verificar se está autenticado

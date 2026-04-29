@@ -1689,8 +1689,15 @@ export default function AlmoxarifadoScreen() {
         : f
       );
 
+      // Filtrar pelo nome do utilizador logado — a API pode devolver ferramentas
+      // de outros utilizadores quando o backend nao filtra correctamente pelo cracha.
+      const userName = user?.name?.trim().toUpperCase() ?? '';
       const minhasComTimer = minhas
-        .filter((f: Ferramenta) => f.status === 'Em uso')
+        .filter((f: Ferramenta) => {
+          if (f.status !== 'Em uso') return false;
+          if (!userName) return true;
+          return f.alocadoPara?.trim().toUpperCase() === userName;
+        })
         .map((f: Ferramenta) => ({
           ...f,
           custodiaDesde: custodyTs[f.codigo] ?? Date.now(),

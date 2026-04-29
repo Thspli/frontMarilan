@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance } from 'axios';
 import * as FileSystem from 'expo-file-system';
 
-const API_BASE_URL = 'https://tool-blah-benz-plays.trycloudflare.com/api';
+const API_BASE_URL = 'https://defeat-forgotten-reduction-compared.trycloudflare.com/api';
 
 interface LoginRequest {
   cracha: string;

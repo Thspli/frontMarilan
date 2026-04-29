@@ -633,19 +633,21 @@ const fc = StyleSheet.create({
  * canTransfer: boolean — passa `true` só para colaboradores.
  * Almoxarife vê o mesmo card mas sem o accent vermelho e sem o hint de "toque p/ transferir".
  */
-function ToolCard({ item, index, onPress, onSolicitar, canTransfer }: {
-  item: Ferramenta; index: number;
-  onPress: (f: Ferramenta) => void;
-  onSolicitar: (f: Ferramenta) => void;
-  canTransfer: boolean;
-}) {
+function ToolCard({ item, index, onPress, onSolicitar, canTransfer, userCracha, userNome }: any) {
   const oy = useRef(new Animated.Value(16)).current;
   const op = useRef(new Animated.Value(0)).current;
   const sc = useRef(new Animated.Value(1)).current;
 
-  // Ferramenta "Em uso" só mostra botão solicitar, não é clicável
   const isInUse = item.status === 'Em uso';
   const isInteractive = !isInUse && canTransfer; // Só clicável se não estiver em uso
+  // DEBUG — remove depois de confirmar os valores
+  if (item.status === 'Em uso') {
+    console.log('[ToolCard] alocadoPara:', JSON.stringify(item.alocadoPara), '| userCracha:', JSON.stringify(userCracha));
+  }
+  const isMinhaFerramenta =
+    item.alocadoPara &&
+    userNome &&
+    item.alocadoPara.trim().toUpperCase() === userNome.trim().toUpperCase();
 
   useEffect(() => {
     Animated.parallel([
@@ -688,8 +690,8 @@ function ToolCard({ item, index, onPress, onSolicitar, canTransfer }: {
             <Text style={tc.cat}>{item.categoria}</Text>
           </View>
 
-          {/* Linha de alocação + botão solicitar — só colaborador */}
-          {isInUse && item.alocadoPara && canTransfer && (
+          {/* Linha de alocação + botão solicitar — só colaborador, ferramenta de outro */}
+          {isInUse && item.alocadoPara && canTransfer && !isMinhaFerramenta && (
             <View style={tc.allocRow}>
               <UserIcon size={11} color={D.red} />
               <Text style={tc.allocText}>{item.alocadoPara}</Text>
@@ -700,6 +702,14 @@ function ToolCard({ item, index, onPress, onSolicitar, canTransfer }: {
               >
                 <Text style={tc.solicitarText}>Solicitar Troca</Text>
               </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Linha de alocação — ferramenta já está com o utilizador */}
+          {isInUse && item.alocadoPara && canTransfer && isMinhaFerramenta && (
+            <View style={tc.allocRow}>
+              <UserIcon size={11} color={D.red} />
+              <Text style={tc.allocText}>Está contigo</Text>
             </View>
           )}
 
@@ -934,6 +944,8 @@ export default function FerramentasScreen() {
                 onPress={handleCardPress}
                 onSolicitar={handleSolicitarPress}
                 canTransfer={canTransfer}
+                userCracha={user?.cracha}
+                userNome={user?.name}
               />
             )}
             contentContainerStyle={s.listContent}

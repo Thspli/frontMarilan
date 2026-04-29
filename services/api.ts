@@ -8,11 +8,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance } from 'axios';
 import * as FileSystem from 'expo-file-system';
 
-const API_BASE_URL = 'https://inf-viewpicture-database-blowing.trycloudflare.com/api';
+const API_BASE_URL = 'https://entry-atm-jackson-suggestion.trycloudflare.com/api';
 
 interface LoginRequest {
   cracha: string;
   password: string;
+}
+
+export interface CriarSolicitacaoRequest {
+  cracha_almoxarife: string;
+  ferramentas: Array<{
+    codigo: string;
+    qtd: number;
+    checklist: string;
+    observacao: string;
+  }>;
 }
 
 interface LoginResponse {
@@ -105,6 +115,14 @@ export class APIClient {
     }
   }
 
+  async criarSolicitacao(request: CriarSolicitacaoRequest): Promise<any> {
+    try {
+      const response = await this.api.post('/solicitacoes', request);
+      return response.data;
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
   /**
    * Login com crachá e senha
    */

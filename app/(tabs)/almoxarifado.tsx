@@ -1635,6 +1635,15 @@ export default function AlmoxarifadoScreen() {
   const [libModalVisible, setLibModalVisible] = useState(false);
   const [auditLogVisible, setAuditLogVisible] = useState(false);
   const [toastState, setToastState] = useState({ visible: false, msg: '', type: 'success' as 'success' | 'error' | 'info' });
+  const {
+  solicitacaoAtual,
+  modalVisible: solicitacaoModalVisible,
+  aprovando,
+  recusando,
+  aprovar,
+  recusar,
+  fecharModal,
+} = useSolicitacoesListener();
   const headerAnim = useRef(new Animated.Value(0)).current;
   const fabAnim = useRef(new Animated.Value(0)).current;
 
@@ -1820,6 +1829,15 @@ export default function AlmoxarifadoScreen() {
       <LoteFooter count={totalQty} onSolicitar={() => setLibModalVisible(true)} anim={fabAnim} />
       <LibModal visible={libModalVisible} lote={lote} onClose={() => setLibModalVisible(false)} onSuccess={handleLibSuccess} />
       <AuditLogModal visible={auditLogVisible} onClose={() => setAuditLogVisible(false)} />
+      <SolicitacaoModal
+  visible={solicitacaoModalVisible}
+  solicitacao={solicitacaoAtual}
+  aprovando={aprovando}
+  recusando={recusando}
+  onAprovar={aprovar}
+  onRecusar={recusar}
+  onFechar={fecharModal}
+/>
       <Toast message={toastState.msg} visible={toastState.visible} type={toastState.type} />
     </View>
   );

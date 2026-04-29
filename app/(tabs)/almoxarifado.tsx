@@ -33,6 +33,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { apiClient } from '../../services/api';
+import { useSolicitacoesListener } from '../../hooks/useSolicitacoesListener';
+import { SolicitacaoModal } from '../../components/SolicitacaoModal';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);

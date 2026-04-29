@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance } from 'axios';
 import * as FileSystem from 'expo-file-system';
 
-const API_BASE_URL = 'https://entry-atm-jackson-suggestion.trycloudflare.com/api';
+const API_BASE_URL = 'https://defeat-forgotten-reduction-compared.trycloudflare.com/api';
 
 interface LoginRequest {
   cracha: string;
@@ -73,6 +73,15 @@ export interface Ferramenta {
   alocadoPara?: string;
 }
 
+export interface Notificacao {
+  id: number;
+  titulo: string;
+  mensagem: string;
+  tipo: 'info' | 'alerta' | 'sucesso';
+  lida: boolean;
+  created_at: string;
+}
+
 export class APIClient {
   private api: AxiosInstance;
   private token: string | null = null;
@@ -112,6 +121,69 @@ export class APIClient {
       this.token = await AsyncStorage.getItem('authToken');
     } catch (error) {
       console.error('Erro ao carregar token do armazenamento:', error);
+    }
+  }
+
+  // --- FLUXO DE DEVOLUÇÃO ---
+
+  async solicitarDevolucao(request: { cracha_colaborador: string; ferramentas: { codigo: string }[] }): Promise<any> {
+    try {
+      const response = await this.api.post('/devolucao/solicitar', request);
+      return response.data;
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  async listarDevolucoesPendentes(): Promise<any> {
+    try {
+      const response = await this.api.get('/devolucao/pendentes');
+      return response.data;
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  async confirmarDevolucao(id: number, checklistStatus: 'ok' | 'com_defeito', observacao?: string): Promise<any> {
+    try {
+      const response = await this.api.post(`/devolucao/${id}/confirmar`, {
+        checklist_status: checklistStatus,
+        observacao: observacao
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  async recusarDevolucao(id: number, motivo: string): Promise<any> {
+    try {
+      const response = await this.api.post(`/devolucao/${id}/recusar`, { motivo });
+      return response.data;
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  /**
+   * Verificar status de uma solicitação específica (Polling)
+   */
+  /**
+   * Verificar status de uma solicitação específica (Polling)
+   */
+  async verificarStatusSolicitacao(id: number): Promise<'pendente' | 'aprovada' | 'recusada'> {
+    try {
+      console.log(`[Polling] A perguntar ao servidor o status do Pedido #${id}...`);
+      
+      // O ?t=${Date.now()} força o telemóvel a não usar cache antigo
+      const response = await this.api.get(`/solicitacoes/${id}/status?t=${Date.now()}`);
+      
+      console.log(`[Polling] Resposta do Pedido #${id}:`, response.data.status);
+      return response.data.status;
+      
+    } catch (error) {
+      console.error(`[Polling] ERRO de rede ou 404 no Pedido #${id}:`, error);
+      return 'pendente'; 
     }
   }
 
@@ -276,6 +348,46 @@ async verificarTrocaRecebida(cracha: string): Promise<{ ferramenta_nome: string;
     return null;
   }
 }
+
+/**
+   * ─── NOTIFICAÇÕES ────────────────────────────────────────────────────────
+   */
+
+  /**
+   * Buscar todas as notificações do utilizador logado
+   */
+  async listarNotificacoes(): Promise<Notificacao[]> {
+    try {
+      const response = await this.api.get<Notificacao[]>('/notificacoes');
+      return response.data;
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  /**
+   * Marcar uma notificação específica como lida
+   */
+  async marcarNotificacaoLida(id: number): Promise<any> {
+    try {
+      const response = await this.api.patch(`/notificacoes/${id}/ler`);
+      return response.data;
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
+
+  /**
+   * Marcar todas as notificações do utilizador como lidas
+   */
+  async marcarTodasNotificacoesLidas(): Promise<any> {
+    try {
+      const response = await this.api.post('/notificacoes/ler-tudo');
+      return response.data;
+    } catch (error) {
+      throw new Error(this.extractErrorMessage(error));
+    }
+  }
 
 async confirmarVisualizacaoTroca(cracha: string): Promise<void> {
   try {

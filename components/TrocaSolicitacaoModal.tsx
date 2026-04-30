@@ -338,13 +338,13 @@ const s = StyleSheet.create({
   crachaText: { fontSize: 11, color: D.slate, fontWeight: '500' },
   swapIconBox: { width: 40, height: 40, borderRadius: 12, backgroundColor: D.blueBg, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: D.blueBorder },
 
-  listaSection: { marginHorizontal: 20, marginTop: 18, gap: 10 },
+  listaSection: { marginHorizontal: 20, marginTop: 18, gap: 10, flexShrink: 1 },
   listaTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   listaBar: { width: 3.5, height: 13, borderRadius: 2, backgroundColor: D.blue },
   listaTitleText: { flex: 1, fontSize: 10, fontWeight: '800', color: D.slate, letterSpacing: 1.4, textTransform: 'uppercase' },
   listaBadge: { backgroundColor: D.blueBg, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: D.blueBorder },
   listaBadgeNum: { fontSize: 11, fontWeight: '800', color: D.blue },
-  listaScroll: { maxHeight: 160 },
+  listaScroll: { maxHeight: 160, flexShrink: 1 },
 
   ferramentaRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: D.snow, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, borderWidth: 1, borderColor: D.silver },
   ferramentaIconBox: { width: 34, height: 34, borderRadius: 9, backgroundColor: D.orangeSoft, alignItems: 'center', justifyContent: 'center' },

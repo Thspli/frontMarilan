@@ -2163,7 +2163,7 @@ export default function AlmoxarifadoScreen() {
         </View>
         <Animated.View style={[s.header, { opacity: headerAnim, transform: [{ translateY: headerTY }] }]}>
           <View style={s.headerRow}>
-            <View>
+            <View style={{ flexShrink: 1 }}>
               <Text style={s.headerTitle}>Almoxarifado</Text>
               <Text style={s.headerSub}>{headerSubtitle}</Text>
             </View>
@@ -2299,11 +2299,11 @@ const s = StyleSheet.create({
   geoDeco: { position: 'absolute', right: 16, top: 16, flexDirection: 'row', flexWrap: 'wrap', width: 60, gap: 8 },
   geoDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: D.white },
   header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20 },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14, gap: 8 },
   headerTitle: { fontSize: 26, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
   headerSub: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 3, fontWeight: '500', letterSpacing: 0.2 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  auditBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.14)', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
+  auditBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.14)', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', maxWidth: 100 },
   auditBtnText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.8)' },
   refreshBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
   // Banner do colaborador

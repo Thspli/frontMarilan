@@ -719,7 +719,7 @@ function RelatoriosContent() {
 
         <Animated.View style={[s.header, { opacity: headerAnim, transform: [{ translateY: headerTY }] }]}>
           <View style={s.headerTop}>
-            <View>
+            <View style={{ flexShrink: 1 }}>
               <Text style={s.headerTitle}>Relatórios</Text>
               <Text style={s.headerSub}>
                 Painel gerencial · Almoxarife · {movimentacoesCount} movimentação{movimentacoesCount === 1 ? '' : 'es'}
@@ -847,7 +847,7 @@ const s = StyleSheet.create({
   },
   dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: D.white },
   header:    { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 28 },
-  headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
+  headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 8 },
   headerTitle: { fontSize: 28, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
   headerSub:   { fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2, fontWeight: '500' },
   livePill: {
@@ -855,6 +855,7 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 99,
     paddingVertical: 7, paddingHorizontal: 13,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', marginTop: 4,
+    flexShrink: 0,
   },
   liveDot:  { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#5CFF9A' },
   liveText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.8)' },

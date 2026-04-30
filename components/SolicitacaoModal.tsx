@@ -476,6 +476,7 @@ const s = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 18,
     gap: 10,
+    flexShrink: 1,
   },
   listaTitleRow: {
     flexDirection: 'row',
@@ -503,7 +504,7 @@ const s = StyleSheet.create({
   listaBadgeNum: { fontSize: 11, fontWeight: '800', color: D.orange },
 
   // Scroll da lista
-  listaScroll: { maxHeight: 180 },
+  listaScroll: { maxHeight: 180, flexShrink: 1 },
 
   // Linha de cada ferramenta
   ferramentaRow: {

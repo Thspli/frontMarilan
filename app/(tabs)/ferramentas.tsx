@@ -423,18 +423,31 @@ function SwapModal({ visible, tool, meuCracha, onClose, onSuccess }: {
       const readNfc = async () => {
         try {
           const res = await nfcService.readTag();
-          if (isReading && res.success && res.data) {
-             const user = await apiClient.buscarUsuarioPorNFC(res.data);
-             // Bloqueia auto-preenchimento se a tag lida for do próprio usuário
-             if (meuCracha && String(user.cracha) === String(meuCracha)) {
-               setSelfTransferError(true);
-               return;
+          if (!isReading) return;
+
+          if (res.success && res.data) {
+             try {
+               const user = await apiClient.buscarUsuarioPorNFC(res.data);
+               
+               // Bloqueia auto-preenchimento se a tag lida for do próprio usuário
+               if (meuCracha && String(user.cracha) === String(meuCracha)) {
+                 setSelfTransferError(true);
+                 return;
+               }
+               
+               setSelfTransferError(false);
+               setCracha(user.cracha);
+               
+             } catch (apiErr) {
+               // A MÁGICA ENTRA AQUI! Mostramos o código da tag não registrada
+               Alert.alert(
+                 "Tag Não Cadastrada",
+                 `O ID deste chip é:\n\n${res.data}\n\nColoque este código na coluna nfc_id do Colaborador no banco de dados.`
+               );
              }
-             setSelfTransferError(false);
-             setCracha(user.cracha);
           }
         } catch(e) {
-           // Ignora erro silenciosamente para não atrapalhar quem for digitar manual
+           // Ignora erro silenciosamente apenas se for cancelamento do leitor
         }
       };
       

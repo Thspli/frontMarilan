@@ -12,6 +12,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -297,7 +298,12 @@ export default function LoginScreen() {
       </Animated.View>
 
       {/* ── White Card ────────────────────────────────────────────────── */}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <Animated.View style={[s.card, {
           opacity: cardOpacity,
           transform: [{ translateY: cardAnim }, { translateX: shakeAnim }],
@@ -378,6 +384,7 @@ export default function LoginScreen() {
             <View style={s.footerLine} />
           </View>
         </Animated.View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -475,7 +482,7 @@ const s = StyleSheet.create({
 
   // Card
   card: {
-    flex: 1,
+    flexGrow: 1,
     backgroundColor: C.offWhite,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,

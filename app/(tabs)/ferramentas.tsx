@@ -894,7 +894,7 @@ export default function FerramentasScreen() {
         </View>
         <Animated.View style={[s.header, { opacity: headerAnim, transform: [{ translateY: headerTY }] }]}>
           <View style={s.headerTop}>
-            <View>
+            <View style={{ flexShrink: 1 }}>
               <Text style={s.headerTitle}>Ferramentas</Text>
               <Text style={s.headerSub}>
                 {counts.Todos} itens · {canTransfer ? 'toque em "Em uso" para solicitar troca' : 'visão gerencial'}
@@ -1041,10 +1041,10 @@ const s = StyleSheet.create({
   dotGrid: { position: 'absolute', right: 20, top: 20, flexDirection: 'row', flexWrap: 'wrap', width: 72, gap: 8, opacity: 0.18 },
   dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: D.white },
   header: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 28 },
-  headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
+  headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 8 },
   headerTitle: { fontSize: 28, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
   headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2, fontWeight: '500' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   refreshBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
   statsBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.14)', borderRadius: 16, paddingVertical: 14, paddingHorizontal: 6 },
   statsDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.15)' },

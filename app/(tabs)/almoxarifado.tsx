@@ -1911,6 +1911,12 @@ export default function AlmoxarifadoScreen() {
   const { naoLidas, startPolling, stopPolling } = useNotificacoes();
   const isAlmoxarife = user?.role === 'almoxarife';
   const isColaborador = !isAlmoxarife; // colaborador, admin sem papel especial, etc.
+
+  // Crachá reativo: fonte única de verdade para filtragem de ferramentas.
+  // Usar user?.cracha (ou o campo equivalente no seu tipo User) garante que
+  // ao trocar de login o estado seja limpo automaticamente via useEffect abaixo.
+  const crachaAtivo = (user as any)?.cracha ?? (user as any)?.matricula ?? (user as any)?.id ?? null;
+
   // Estados para a devolução do lado do Almoxarife
   const [devPendenteAtual, setDevPendenteAtual] = useState<any>(null);
   const [devAprovacaoVisible, setDevAprovacaoVisible] = useState(false);
@@ -1923,7 +1929,6 @@ export default function AlmoxarifadoScreen() {
   const [libModalVisible, setLibModalVisible] = useState(false);
   const [auditLogVisible, setAuditLogVisible] = useState(false);
   const [toastState, setToastState] = useState({ visible: false, msg: '', type: 'success' as 'success' | 'error' | 'info' });
-  // Adicione junto aos outros states, próximo da linha ~1163
   const [devolucaoModalVisible, setDevolucaoModalVisible] = useState(false);
   const {
     solicitacaoAtual,
@@ -1967,13 +1972,20 @@ export default function AlmoxarifadoScreen() {
 
   useEffect(() => {
     Animated.timing(headerAnim, { toValue: 1, duration: 480, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-    loadData();
     startPolling();
-
-    return () => {
-      stopPolling();
-    };
+    return () => { stopPolling(); };
   }, [startPolling, stopPolling]);
+
+  // Ao trocar de crachá (troca de login), limpa imediatamente os dados do
+  // usuário anterior e recarrega com o crachá corrente.
+  // Isso garante que o botão "Devolver" nunca apareça para o crachá errado.
+  useEffect(() => {
+    setMinhasFerramentas([]);
+    setLote([]);
+    setDevolucaoModalVisible(false);
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crachaAtivo]);
 
   useEffect(() => {
     // FAB só faz sentido para colaborador
@@ -1983,7 +1995,9 @@ export default function AlmoxarifadoScreen() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const cracha = await AsyncStorage.getItem('userCracha');
+      // Prioridade: crachaAtivo (reativo, do useAuth) → AsyncStorage (fallback legado).
+      // Isso evita que ferramentas de um crachá anterior fiquem visíveis após troca de login.
+      const cracha = crachaAtivo ?? await AsyncStorage.getItem('userCracha');
       const custodyTs = await loadCustodyTimestamps();
 
       const [todasRes, minhasRes] = await Promise.allSettled([
@@ -2082,7 +2096,8 @@ export default function AlmoxarifadoScreen() {
       })),
     });
 
-    const crachaAtual = await AsyncStorage.getItem('userCracha') ?? 'DESCONHECIDO';
+    // Prioridade: crachaAtivo reativo → AsyncStorage como fallback
+    const crachaAtual = crachaAtivo ?? await AsyncStorage.getItem('userCracha') ?? 'DESCONHECIDO';
     const log: AuditLog = {
       id: genId(),
       timestamp: Date.now(),
@@ -2104,7 +2119,8 @@ export default function AlmoxarifadoScreen() {
 
   // Adicione a função que vai conversar com a API
   const handleConfirmarDevolucao = async (crachaAlmoxarife: string) => {
-    const crachaColab = await AsyncStorage.getItem('userCracha');
+    // Prioridade: crachaAtivo reativo → AsyncStorage como fallback
+    const crachaColab = crachaAtivo ?? await AsyncStorage.getItem('userCracha');
     if (!crachaColab) throw new Error("ID do colaborador não encontrado");
 
     // Nova requisição (passando apenas o código e o crachá do colaborador)

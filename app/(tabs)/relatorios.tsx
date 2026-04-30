@@ -1,16 +1,5 @@
 /**
- * app/(tabs)/relatorios.tsx — Marilan v2.2 · Guarda de Acesso Dupla Camada
- *
- * SEGURANÇA v2:
- *   Camada 1 (Layout): A aba não aparece no menu se role !== 'almoxarife' (ver _layout.tsx).
- *   Camada 2 (Tela):   Se um colaborador chegar aqui por deep link ou erro de nav,
- *                      vê apenas o componente <AcessoNegado> e não consegue
- *                      acessar nenhuma informação gerencial.
- *
- *   Lógica de estado: useAuth lê AsyncStorage.getItem('userRole') no boot e
- *   mantém o estado em memória. Ao deslogar e logar com outra conta, o hook
- *   reseta user → null e depois popula com o novo role — garantindo que a
- *   permissão seja recalculada instantaneamente sem cache residual.
+ * app/(tabs)/relatorios.tsx — Marilan v2.3
  */
 
 import { useRouter } from 'expo-router';
@@ -22,6 +11,8 @@ import {
   Animated,
   Easing,
   Platform,
+  RefreshControl,
+  Modal,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -72,8 +63,6 @@ const STATUS_CFG: Record<ToolStatus, { dot: string; bg: string; text: string }> 
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ─── COMPONENTE: ACESSO NEGADO ────────────────────────────────────────────────
-// Exibido para qualquer usuário sem role 'almoxarife'.
-// Design propositalmente austero — não revela nenhuma informação da tela real.
 // ══════════════════════════════════════════════════════════════════════════════
 function AcessoNegado() {
   const router = useRouter();
@@ -106,82 +95,35 @@ function AcessoNegado() {
   return (
     <View style={an.root}>
       <StatusBar barStyle="light-content" backgroundColor={D.orangeDark} />
-
-      {/* Fundo com padrão pontilhado — igual às outras telas */}
       <View style={an.dotPattern} pointerEvents="none">
         {Array.from({ length: 20 }).map((_, i) => (
           <View key={i} style={[an.dot, { opacity: i % 3 === 0 ? 0.18 : 0.08 }]} />
         ))}
       </View>
-
       <SafeAreaView style={an.safe} edges={['top', 'bottom']}>
-        {/* Ícone de cadeado animado */}
         <Animated.View style={[an.iconWrap, { opacity: iconOp, transform: [{ scale: iconScale }] }]}>
           <View style={an.iconOuterRing}>
             <View style={an.iconInnerRing}>
-              {/* Cadeado SVG */}
               <Svg width={44} height={44} viewBox="0 0 24 24" fill="none">
-                <Rect
-                  x={3} y={11} width={18} height={11} rx={2}
-                  stroke={D.white} strokeWidth={1.8}
-                />
-                <Path
-                  d="M7 11V7a5 5 0 0 1 10 0v4"
-                  stroke={D.white} strokeWidth={1.8} strokeLinecap="round"
-                />
+                <Rect x={3} y={11} width={18} height={11} rx={2} stroke={D.white} strokeWidth={1.8} />
+                <Path d="M7 11V7a5 5 0 0 1 10 0v4" stroke={D.white} strokeWidth={1.8} strokeLinecap="round" />
                 <Circle cx={12} cy={16} r={1.5} fill={D.white} />
               </Svg>
             </View>
           </View>
         </Animated.View>
-
-        {/* Texto e ações */}
         <Animated.View style={[an.content, { opacity: contentOp, transform: [{ translateY: contentY }] }]}>
-          {/* Badge de nível de acesso */}
           <View style={an.restrictedBadge}>
             <View style={an.restrictedDot} />
             <Text style={an.restrictedBadgeText}>ACESSO RESTRITO</Text>
           </View>
-
           <Text style={an.title}>Área Protegida</Text>
-
-          <Text style={an.message}>
-            Área restrita a gestores do Almoxarifado.
-          </Text>
-
+          <Text style={an.message}>Área restrita a gestores do Almoxarifado.</Text>
           <Text style={an.subMessage}>
             Sua conta não possui permissão para visualizar relatórios gerenciais.
-            Caso acredite que isso seja um erro, entre em contato com o administrador do sistema.
           </Text>
-
-          {/* Separador decorativo */}
-          <View style={an.separator}>
-            <View style={an.separatorLine} />
-            <View style={an.separatorDot} />
-            <View style={an.separatorLine} />
-          </View>
-
-          {/* Info card */}
-          <View style={an.infoCard}>
-            <Svg width={15} height={15} viewBox="0 0 24 24" fill="none">
-              <Circle cx={12} cy={12} r={9} stroke="rgba(255,255,255,0.55)" strokeWidth={1.6} />
-              <Path d="M12 8v4M12 16h.01" stroke="rgba(255,255,255,0.55)" strokeWidth={1.8} strokeLinecap="round" />
-            </Svg>
-            <Text style={an.infoText}>
-              Apenas usuários com perfil <Text style={an.infoHighlight}>Almoxarife</Text> podem
-              acessar relatórios e métricas de ocupação.
-            </Text>
-          </View>
-
-          {/* Botão de retorno */}
-          <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }], marginTop: 8 }}>
+          <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }], marginTop: 20 }}>
             <TouchableOpacity style={an.backBtn} onPress={handleVoltar} activeOpacity={0.88}>
-              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M9 14l-4-4m0 0l4-4m-4 4h15"
-                  stroke={D.orange} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-                />
-              </Svg>
               <Text style={an.backBtnText}>Voltar para Ferramentas</Text>
             </TouchableOpacity>
           </Animated.View>
@@ -192,187 +134,53 @@ function AcessoNegado() {
 }
 
 const an = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: D.orangeDark,
-  },
-  safe: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-    gap: 0,
-  },
-  dotPattern: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 24,
-    gap: 20,
-    alignContent: 'flex-start',
-  },
-  dot: {
-    width: 4, height: 4, borderRadius: 2,
-    backgroundColor: D.white,
-  },
-
-  // Ícone animado
-  iconWrap: {
-    marginBottom: 32,
-  },
-  iconOuterRing: {
-    width: 120, height: 120, borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconInnerRing: {
-    width: 88, height: 88, borderRadius: 44,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Conteúdo
-  content: {
-    alignItems: 'center',
-    width: '100%',
-    gap: 14,
-  },
-  restrictedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 99,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  restrictedDot: {
-    width: 7, height: 7, borderRadius: 3.5,
-    backgroundColor: '#FF6B6B',
-  },
-  restrictedBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: 'rgba(255,255,255,0.75)',
-    letterSpacing: 2,
-  },
-  title: {
-    fontSize: 30,
-    fontWeight: '900',
-    color: D.white,
-    letterSpacing: -0.5,
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  message: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.85)',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  subMessage: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.48)',
-    textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: 8,
-  },
-
-  separator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    gap: 10,
-    marginVertical: 4,
-  },
-  separatorLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  separatorDot: {
-    width: 5, height: 5, borderRadius: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-
-  infoCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    width: '100%',
-  },
-  infoText: {
-    flex: 1,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.48)',
-    lineHeight: 18,
-  },
-  infoHighlight: {
-    color: 'rgba(255,255,255,0.75)',
-    fontWeight: '700',
-  },
-
-  backBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    height: 54,
-    borderRadius: 14,
-    backgroundColor: D.white,
-    width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  backBtnText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: D.orange,
-    letterSpacing: 0.1,
-  },
+  root: { flex: 1, backgroundColor: D.orangeDark },
+  safe: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+  dotPattern: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row', flexWrap: 'wrap', padding: 24, gap: 20 },
+  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: D.white },
+  iconWrap: { marginBottom: 32 },
+  iconOuterRing: { width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  iconInnerRing: { width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' },
+  content: { alignItems: 'center', width: '100%', gap: 14 },
+  restrictedBadge: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 99, paddingVertical: 6, paddingHorizontal: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  restrictedDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#FF6B6B' },
+  restrictedBadgeText: { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.75)', letterSpacing: 2 },
+  title: { fontSize: 30, fontWeight: '900', color: D.white, letterSpacing: -0.5, textAlign: 'center', marginTop: 2 },
+  message: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textAlign: 'center', lineHeight: 22 },
+  subMessage: { fontSize: 13, color: 'rgba(255,255,255,0.48)', textAlign: 'center', lineHeight: 20 },
+  backBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 54, borderRadius: 14, backgroundColor: D.white, width: '100%' },
+  backBtnText: { fontSize: 15, fontWeight: '800', color: D.orange },
 });
 
 // ─── Ícones ──────────────────────────────────────────────────────────────────
-const WrenchIcon = ({ size = 16, color = D.orange }: { size?: number; color?: string }) => (
+const WrenchIcon = ({ size = 16, color = D.orange }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
-      stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
-const UserIcon = ({ size = 13, color = D.red }: { size?: number; color?: string }) => (
+const UserIcon = ({ size = 13, color = D.red }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Circle cx={12} cy={8} r={4} stroke={color} strokeWidth={1.8} />
     <Path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
   </Svg>
 );
 
-const DownloadIcon = ({ size = 18, color = D.white }: { size?: number; color?: string }) => (
+const DownloadIcon = ({ size = 18, color = D.white }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke={color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
     <Path d="M14 2v6h6M12 18v-6M9 15l3 3 3-3" stroke={color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 
-// ─── Status Badge ───────────────────────────────────────────────────────────
+const RefreshIcon = ({ size = 16, color = D.white }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M21 3v5h-5" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+// ─── Componentes Visuais ──────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CFG[status as ToolStatus] ?? { dot: D.gray400, bg: D.gray100, text: D.gray500 };
   return (
@@ -388,7 +196,6 @@ const sb = StyleSheet.create({
   label: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
 });
 
-// ─── Section Header ──────────────────────────────────────────────────────────
 function SectionHeader({ label, count, color = D.gray500 }: { label: string; count: number; color?: string }) {
   return (
     <View style={sh.row}>
@@ -408,7 +215,6 @@ const sh = StyleSheet.create({
   num:   { fontSize: 11, fontWeight: '800' },
 });
 
-// ─── Stat Box ────────────────────────────────────────────────────────────────
 function StatBox({ value, label, anim, color = D.white }: { value: number; label: string; anim: Animated.Value; color?: string }) {
   const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] });
   return (
@@ -424,7 +230,6 @@ const stb = StyleSheet.create({
   label: { fontSize: 10, color: 'rgba(255,255,255,0.65)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
 });
 
-// ─── Occupancy Bar ───────────────────────────────────────────────────────────
 function OccupancyBar({ pct, anim }: { pct: number; anim: Animated.Value }) {
   const width = anim.interpolate({ inputRange: [0, 1], outputRange: ['0%', `${pct}%`] });
   return (
@@ -440,7 +245,6 @@ const occ = StyleSheet.create({
   rest:  { position: 'absolute', right: 0, top: 0, bottom: 0, backgroundColor: D.greenBg, borderRadius: 99 },
 });
 
-// ─── Tool Row ────────────────────────────────────────────────────────────────
 function ToolRow({ item, index }: { item: Ferramenta; index: number }) {
   const oy = useRef(new Animated.Value(12)).current;
   const op = useRef(new Animated.Value(0)).current;
@@ -499,10 +303,8 @@ const tr = StyleSheet.create({
   allocText:  { fontSize: 11, fontWeight: '700', color: D.red },
 });
 
-// ─── Metric Card ─────────────────────────────────────────────────────────────
 function MetricCard({ label, value, sub, color, icon, anim }: {
-  label: string; value: number; sub: string;
-  color: string; icon: React.ReactNode; anim: Animated.Value;
+  label: string; value: number; sub: string; color: string; icon: React.ReactNode; anim: Animated.Value;
 }) {
   const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
   return (
@@ -522,7 +324,6 @@ const mc = StyleSheet.create({
   sub:     { fontSize: 10, color: D.gray400, textAlign: 'center' },
 });
 
-// ─── Toast ───────────────────────────────────────────────────────────────────
 function Toast({ message, visible }: { message: string; visible: boolean }) {
   const y  = useRef(new Animated.Value(20)).current;
   const op = useRef(new Animated.Value(0)).current;
@@ -564,14 +365,8 @@ const tos = StyleSheet.create({
 // ─── TELA PRINCIPAL ───────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 export default function RelatoriosScreen() {
-  // ── CAMADA 2 DE SEGURANÇA ──────────────────────────────────────────────────
-  // Mesmo que o usuário chegue aqui por deep link (ex: myapp://relatorios),
-  // verificamos o role novamente. O useAuth lê AsyncStorage no boot e mantém
-  // o estado atualizado ao longo do ciclo de vida da sessão.
   const { user, isLoading } = useAuth();
 
-  // Durante a hidratação do estado de auth, mostramos um loading neutro
-  // (não o conteúdo real, para evitar flash de dados restritos).
   if (isLoading) {
     return (
       <View style={guard.loadWrap}>
@@ -582,42 +377,25 @@ export default function RelatoriosScreen() {
     );
   }
 
-  // Bloqueio definitivo: role diferente de 'almoxarife' → tela de Acesso Negado.
-  // Isso cobre: colaborador, admin (se não for almoxarife), usuário não autenticado,
-  // e qualquer role inesperado vindo da API.
   if (!user || user.role !== 'almoxarife') {
     return <AcessoNegado />;
   }
 
-  // ── A partir daqui o código só executa para almoxarifes autenticados ───────
   return <RelatoriosContent />;
 }
 
 const guard = StyleSheet.create({
-  loadWrap: {
-    flex: 1,
-    backgroundColor: D.orangeDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-  },
-  loadText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.6)',
-    fontWeight: '600',
-  },
+  loadWrap: { flex: 1, backgroundColor: D.orangeDark, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  loadText: { fontSize: 14, color: 'rgba(255,255,255,0.6)', fontWeight: '600' },
 });
 
-// ─── CONTEÚDO DOS RELATÓRIOS (só renderizado para almoxarifes) ───────────────
-// Separado em componente próprio para que o React não instancie os hooks
-// de dados enquanto o guard ainda não passou.
 function RelatoriosContent() {
-  const router = useRouter();
-
   const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
   const [movimentacoesCount, setMovimentacoesCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false); // Novo estado de refresh
   const [exporting, setExporting] = useState(false);
+  const [modalFormatoVisible, setModalFormatoVisible] = useState(false);
   const [toast, setToast] = useState({ visible: false, msg: '' });
 
   const headerAnim = useRef(new Animated.Value(0)).current;
@@ -638,6 +416,23 @@ function RelatoriosContent() {
     return { total, emUso, disponiveis, manutencao, ocupacao };
   }, [ferramentas]);
 
+  // Extraímos o carregamento para poder usar no Pull-to-Refresh
+  const carregarDados = async () => {
+    try {
+      setLoading(true);
+      const [ferramentasApi, relatorio] = await Promise.all([
+        apiClient.listarFerramentas(),
+        apiClient.listarRelatoriosMovimentacoes(),
+      ]);
+      setFerramentas(ferramentasApi);
+      setMovimentacoesCount(Array.isArray(relatorio) ? relatorio.length : 0);
+    } catch (error: any) {
+      Alert.alert('Erro', error.message || 'Não foi possível carregar os dados do relatório.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     Animated.sequence([
       Animated.timing(headerAnim, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
@@ -655,33 +450,28 @@ function RelatoriosContent() {
       ]).start();
       Animated.timing(barAnim, { toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
     }, 500);
-  }, []);
 
-  useEffect(() => {
-    const carregarDados = async () => {
-      try {
-        setLoading(true);
-        const [ferramentasApi, relatorio] = await Promise.all([
-          apiClient.listarFerramentas(),
-          apiClient.listarRelatoriosMovimentacoes(),
-        ]);
-        setFerramentas(ferramentasApi);
-        setMovimentacoesCount(Array.isArray(relatorio) ? relatorio.length : 0);
-      } catch (error: any) {
-        Alert.alert('Erro', error.message || 'Não foi possível carregar os dados do relatório.');
-      } finally {
-        setLoading(false);
-      }
-    };
     carregarDados();
   }, []);
+
+  // Função disparada no Pull-to-Refresh ou pelo botão do cabeçalho
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await carregarDados();
+    setRefreshing(false);
+  };
 
   const showToast = (msg: string) => {
     setToast({ visible: true, msg });
     setTimeout(() => setToast({ visible: false, msg: '' }), 3200);
   };
 
-  const exportarExcel = async () => {
+  // Melhoria no botão de Baixar: Agora permite escolher entre PDF e Excel
+  const promptExportarRelatorio = () => {
+    setModalFormatoVisible(true);
+  };
+
+  const processarExportacao = async (formato: 'excel' | 'pdf') => {
     Animated.sequence([
       Animated.timing(btnScale, { toValue: 0.96, duration: 70, useNativeDriver: true }),
       Animated.spring(btnScale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
@@ -689,16 +479,16 @@ function RelatoriosContent() {
 
     try {
       setExporting(true);
-      const path = await apiClient.baixarRelatorio('excel');
+      const path = await apiClient.baixarRelatorio(formato);
       const ok = await Sharing.isAvailableAsync();
       if (ok) {
         await Sharing.shareAsync(path);
-        showToast('Planilha exportada com sucesso!');
+        showToast(`Relatório em ${formato.toUpperCase()} gerado com sucesso!`);
       } else {
         Alert.alert('Aviso', 'Compartilhamento não disponível neste dispositivo.');
       }
     } catch (error: any) {
-      Alert.alert('Erro', error?.message || 'Não foi possível gerar a planilha.');
+      Alert.alert('Erro', error?.message || 'Não foi possível gerar o arquivo.');
     } finally {
       setExporting(false);
     }
@@ -725,9 +515,16 @@ function RelatoriosContent() {
                 Painel gerencial · Almoxarife · {movimentacoesCount} movimentação{movimentacoesCount === 1 ? '' : 'es'}
               </Text>
             </View>
-            <View style={s.livePill}>
-              <Animated.View style={[s.liveDot, { opacity: headerAnim }]} />
-              <Text style={s.liveText}>Ao vivo</Text>
+            
+            {/* NOVO: Ações no topo (Live Pill + Botão Refresh) */}
+            <View style={s.headerActions}>
+              <View style={s.livePill}>
+                <Animated.View style={[s.liveDot, { opacity: headerAnim }]} />
+                <Text style={s.liveText}>Ao vivo</Text>
+              </View>
+              <TouchableOpacity style={s.refreshBtn} onPress={onRefresh} disabled={loading || refreshing}>
+                {refreshing ? <ActivityIndicator size="small" color={D.white} /> : <RefreshIcon color={D.white} />}
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -745,8 +542,16 @@ function RelatoriosContent() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[s.bodyContent, { paddingBottom: 100 }]}
+          refreshControl={ // NOVO: Pull to refresh adicionado
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={D.orange}
+              colors={[D.orange]}
+            />
+          }
         >
-          {loading && (
+          {loading && !refreshing && (
             <View style={s.loadingOverlay}>
               <ActivityIndicator color={D.orange} size="large" />
               <Text style={s.loadingText}>Carregando informações do relatório...</Text>
@@ -810,16 +615,17 @@ function RelatoriosContent() {
           </View>
         </ScrollView>
 
+        {/* Botão Flutuante Atualizado */}
         <Animated.View style={[s.exportFab, { transform: [{ scale: btnScale }] }]}>
-          <TouchableOpacity style={s.exportBtn} onPress={exportarExcel} disabled={exporting} activeOpacity={0.87}>
+          <TouchableOpacity style={s.exportBtn} onPress={promptExportarRelatorio} disabled={exporting} activeOpacity={0.87}>
             {exporting ? (
               <ActivityIndicator color={D.white} size="small" />
             ) : (
               <>
                 <DownloadIcon size={20} color={D.white} />
                 <View>
-                  <Text style={s.exportLabel}>Exportar Inventário</Text>
-                  <Text style={s.exportSub}>Salvar planilha Excel (.xlsx)</Text>
+                  <Text style={s.exportLabel}>Baixar Relatório</Text>
+                  <Text style={s.exportSub}>Escolha entre PDF ou Excel</Text>
                 </View>
                 <View style={s.exportArrow}>
                   <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
@@ -831,6 +637,48 @@ function RelatoriosContent() {
           </TouchableOpacity>
         </Animated.View>
       </View>
+
+      {/* NOVO MODAL DE ESCOLHA DE FORMATO */}
+      <Modal visible={modalFormatoVisible} transparent animationType="fade" onRequestClose={() => setModalFormatoVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <View style={{ backgroundColor: D.white, width: '100%', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 15 }}>
+            
+            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: D.orangeDim, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <DownloadIcon size={26} color={D.orange} />
+            </View>
+            
+            <Text style={{ fontSize: 20, fontWeight: '900', color: D.black, marginBottom: 8, letterSpacing: -0.5 }}>Exportar Relatório</Text>
+            <Text style={{ fontSize: 14, color: D.gray500, textAlign: 'center', marginBottom: 28, lineHeight: 20 }}>
+              Escolha em qual formato você deseja baixar o inventário atual do almoxarifado.
+            </Text>
+
+            <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: D.red, paddingVertical: 14, borderRadius: 14, alignItems: 'center', shadowColor: D.red, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 }}
+                onPress={() => { setModalFormatoVisible(false); processarExportacao('pdf'); }}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: D.white, fontWeight: '800', fontSize: 14, letterSpacing: 0.5 }}>GERAR PDF</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: D.green, paddingVertical: 14, borderRadius: 14, alignItems: 'center', shadowColor: D.green, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 }}
+                onPress={() => { setModalFormatoVisible(false); processarExportacao('excel'); }}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: D.white, fontWeight: '800', fontSize: 14, letterSpacing: 0.5 }}>GERAR EXCEL</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={{ marginTop: 24, paddingVertical: 10, width: '100%', alignItems: 'center' }}
+              onPress={() => setModalFormatoVisible(false)}
+            >
+              <Text style={{ color: D.gray500, fontWeight: '700', fontSize: 14 }}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Toast message={toast.msg} visible={toast.visible} />
     </View>
@@ -850,15 +698,24 @@ const s = StyleSheet.create({
   headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 8 },
   headerTitle: { fontSize: 28, fontWeight: '900', color: D.white, letterSpacing: -0.5 },
   headerSub:   { fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2, fontWeight: '500' },
+  
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
   livePill: {
     flexDirection: 'row', alignItems: 'center', gap: 7,
     backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 99,
     paddingVertical: 7, paddingHorizontal: 13,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', marginTop: 4,
-    flexShrink: 0,
   },
   liveDot:  { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#5CFF9A' },
   liveText: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.8)' },
+  refreshBtn: { 
+    width: 36, height: 36, borderRadius: 12, 
+    backgroundColor: 'rgba(255,255,255,0.12)', 
+    alignItems: 'center', justifyContent: 'center', 
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', 
+    marginTop: 4 
+  },
+
   statsBar:     { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.14)', borderRadius: 16, paddingVertical: 14, paddingHorizontal: 6 },
   statsDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.15)' },
   body:        { flex: 1, backgroundColor: D.offWhite, borderTopLeftRadius: 26, borderTopRightRadius: 26, overflow: 'hidden' },

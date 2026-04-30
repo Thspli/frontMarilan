@@ -38,6 +38,8 @@ import { nfcService } from '../../services/nfc';
 import { useAuth } from '@/hooks/useAuth';
 import { useNotificacoes } from '@/hooks/useNotificacoes';
 import { HeaderNotificationButton } from '@/components/HeaderNotificationButton';
+import { TrocaSolicitacaoModal } from '@/components/TrocaSolicitacaoModal';
+import { useTrocaSolicitacaoListener } from '@/hooks/useTrocaSolicitacaoListener';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -393,13 +395,15 @@ function useTrocaRecebidaListener() {
 }
 
 // ─── Swap Modal ────────────────────────────────────────────────────────────────
-function SwapModal({ visible, tool, onClose, onSuccess }: {
+function SwapModal({ visible, tool, meuCracha, onClose, onSuccess }: {
   visible: boolean; tool: Ferramenta | null;
+  meuCracha: string | null;
   onClose: () => void; onSuccess: (codigo: string, paraNome: string) => void;
 }) {
   const [cracha, setCracha] = useState('');
   const [obs, setObs] = useState('');
   const [loading, setLoading] = useState(false);
+  const [selfTransferError, setSelfTransferError] = useState(false);
   const slideY = useRef(new Animated.Value(400)).current;
   const bgOp = useRef(new Animated.Value(0)).current;
   const btnScale = useRef(new Animated.Value(1)).current;
@@ -408,7 +412,7 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
     let isReading = true;
 
     if (visible) {
-      setCracha(''); setObs(''); setLoading(false);
+      setCracha(''); setObs(''); setLoading(false); setSelfTransferError(false);
       
       Animated.parallel([
         Animated.spring(slideY, { toValue: 0, tension: 68, friction: 13, useNativeDriver: true }),
@@ -420,12 +424,17 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
         try {
           const res = await nfcService.readTag();
           if (isReading && res.success && res.data) {
-             // Traduz a tag para o Crachá usando a API
              const user = await apiClient.buscarUsuarioPorNFC(res.data);
-             setCracha(user.cracha); // Auto-preenche o campo!
+             // Bloqueia auto-preenchimento se a tag lida for do próprio usuário
+             if (meuCracha && String(user.cracha) === String(meuCracha)) {
+               setSelfTransferError(true);
+               return;
+             }
+             setSelfTransferError(false);
+             setCracha(user.cracha);
           }
         } catch(e) {
-           // Ignora erro silenciamente para não atrapalhar quem for digitar manual
+           // Ignora erro silenciosamente para não atrapalhar quem for digitar manual
         }
       };
       
@@ -440,6 +449,12 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
     return () => { isReading = false; nfcService.stop(); };
   }, [visible]);
 
+  // Limpa o erro de auto-troca quando o usuário corrige o campo manualmente
+  const handleCrachaChange = (val: string) => {
+    setSelfTransferError(false);
+    setCracha(val);
+  };
+
   const close = () => {
     nfcService.stop();
     Animated.parallel([
@@ -450,27 +465,36 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
 
   const submit = async () => {
     if (!cracha.trim() || !tool) return;
+
+    // Guard: impede transferência para o próprio crachá
+    if (meuCracha && String(cracha.trim()) === String(meuCracha)) {
+      setSelfTransferError(true);
+      return;
+    }
+
     Animated.sequence([
       Animated.timing(btnScale, { toValue: 0.97, duration: 70, useNativeDriver: true }),
       Animated.spring(btnScale, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
     ]).start();
     try {
       setLoading(true);
-      await apiClient.trocar({
-        cracha_novo_colaborador: cracha.trim(),
-        ferramentas: [{ codigo: tool.codigo, qtd: 1, checklist: 'REALIZADO', observacao: obs.trim() || 'Troca via app' }],
+      await apiClient.solicitarTrocaP2P({
+        de_cracha: meuCracha ?? '',
+        para_cracha: cracha.trim(),
+        ferramentas: [{ codigo: tool.codigo, qtd: 1 }],
       });
       close();
       setTimeout(() => onSuccess(tool.nome, cracha.trim()), 320);
     } catch (e: any) {
-      Alert.alert('Erro', e.message || 'Falha ao transferir');
+      Alert.alert('Erro', e.message || 'Falha ao solicitar troca');
     } finally {
       setLoading(false);
     }
   };
 
   if (!tool) return null;
-  const canSubmit = cracha.trim().length > 0 && !loading;
+  const isSelf = meuCracha ? String(cracha.trim()) === String(meuCracha) : false;
+  const canSubmit = cracha.trim().length > 0 && !loading && !isSelf;
 
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={close}>
@@ -495,24 +519,33 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
           {/* Animação que avisa que o leitor está ativo */}
           <NFCPulse active={!cracha} /> 
           
-          <Text style={ms.title}>Transferir Ferramenta</Text>
+          <Text style={ms.title}>Solicitar Troca</Text>
           <Text style={ms.sub}>Aproxime o celular do crachá do parceiro{'\n'}ou digite o número manualmente</Text>
-          <View style={[ms.inputWrap, cracha.length > 0 && { borderColor: D.green, borderWidth: 2 }]}>
+          <View style={[ms.inputWrap, cracha.length > 0 && !isSelf && { borderColor: D.green, borderWidth: 2 }, isSelf && { borderColor: D.red, borderWidth: 2 }]}>
             <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
-              <Rect x={2} y={5} width={20} height={14} rx={2} stroke={cracha ? D.green : D.orange} strokeWidth={1.8} />
-              <Circle cx={9} cy={12} r={2.5} stroke={cracha ? D.green : D.orange} strokeWidth={1.6} />
-              <Path d="M14 10h4M14 14h3" stroke={cracha ? D.green : D.orange} strokeWidth={1.5} strokeLinecap="round" />
+              <Rect x={2} y={5} width={20} height={14} rx={2} stroke={isSelf ? D.red : cracha ? D.green : D.orange} strokeWidth={1.8} />
+              <Circle cx={9} cy={12} r={2.5} stroke={isSelf ? D.red : cracha ? D.green : D.orange} strokeWidth={1.6} />
+              <Path d="M14 10h4M14 14h3" stroke={isSelf ? D.red : cracha ? D.green : D.orange} strokeWidth={1.5} strokeLinecap="round" />
             </Svg>
             <TextInput
               style={ms.input}
               placeholder="Aproxime o NFC ou digite..."
               placeholderTextColor={D.gray300}
               value={cracha}
-              onChangeText={setCracha}
+              onChangeText={handleCrachaChange}
               keyboardType="numeric"
               autoCorrect={false}
             />
           </View>
+          {(selfTransferError || isSelf) && (
+            <View style={ms.selfErrorWrap}>
+              <Svg width={13} height={13} viewBox="0 0 24 24" fill="none">
+                <Circle cx={12} cy={12} r={9} stroke={D.red} strokeWidth={2} />
+                <Path d="M12 8v4M12 16h.01" stroke={D.red} strokeWidth={2} strokeLinecap="round" />
+              </Svg>
+              <Text style={ms.selfErrorText}>Você não pode solicitar troca consigo mesmo</Text>
+            </View>
+          )}
           <View style={[ms.inputWrap, { height: 52 }]}>
             <Svg width={17} height={17} viewBox="0 0 24 24" fill="none">
               <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke={D.gray300} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
@@ -537,7 +570,7 @@ function SwapModal({ visible, tool, onClose, onSuccess }: {
                 ? <ActivityIndicator color={D.white} size="small" />
                 : (
                   <>
-                    <Text style={[ms.confirmText, !canSubmit && ms.confirmTextDisabled]}>Confirmar Transferência</Text>
+                    <Text style={[ms.confirmText, !canSubmit && ms.confirmTextDisabled]}>Solicitar Troca</Text>
                     <ArrowRight color={canSubmit ? D.white : D.gray400} />
                   </>
                 )
@@ -558,6 +591,8 @@ const ms = StyleSheet.create({
   toolName: { fontSize: 15, fontWeight: '800', color: D.black, letterSpacing: -0.1 },
   toolMeta: { fontSize: 12, color: D.gray500, marginTop: 2 },
   closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: D.gray100, alignItems: 'center', justifyContent: 'center' },
+  selfErrorWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: D.redBg, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: `${D.red}30`, width: '100%' },
+  selfErrorText: { fontSize: 12, fontWeight: '600', color: D.red, flex: 1 },
   sep: { height: 1, backgroundColor: D.gray100 },
   body: { paddingHorizontal: 24, paddingTop: 24, alignItems: 'center', gap: 14 },
   title: { fontSize: 22, fontWeight: '900', color: D.black, letterSpacing: -0.3, textAlign: 'center' },
@@ -607,18 +642,19 @@ const fc = StyleSheet.create({
  * canTransfer: boolean — passa `true` só para colaboradores.
  * Almoxarife vê o mesmo card mas sem o accent vermelho e sem o hint de "toque p/ transferir".
  */
-function ToolCard({ item, index, onPress, canTransfer }: {
+function ToolCard({ item, index, onPress, canTransfer, isMinhaFerramenta }: {
   item: Ferramenta; index: number;
   onPress: (f: Ferramenta) => void;
   canTransfer: boolean;
+  isMinhaFerramenta: boolean;
 }) {
   const oy = useRef(new Animated.Value(16)).current;
   const op = useRef(new Animated.Value(0)).current;
   const sc = useRef(new Animated.Value(1)).current;
 
-  // Ferramenta "Em uso" só é interativa se o usuário pode transferir
+  // Interativo apenas se: colaborador + em uso + NÃO é a ferramenta do próprio usuário
   const isInUse = item.status === 'Em uso';
-  const isInteractive = isInUse && canTransfer;
+  const isInteractive = isInUse && canTransfer && !isMinhaFerramenta;
 
   useEffect(() => {
     Animated.parallel([
@@ -661,12 +697,23 @@ function ToolCard({ item, index, onPress, canTransfer }: {
             <Text style={tc.cat}>{item.categoria}</Text>
           </View>
 
-          {/* Linha de alocação + hint de troca — só colaborador */}
-          {isInUse && item.alocadoPara && canTransfer && (
+          {/* Linha de alocação + hint de troca — colaborador, ferramenta de outra pessoa */}
+          {isInUse && item.alocadoPara && canTransfer && !isMinhaFerramenta && (
             <View style={tc.allocRow}>
               <UserIcon size={11} color={D.red} />
               <Text style={tc.allocText}>{item.alocadoPara}</Text>
-              <Text style={tc.tapHint}>Toque para transferir →</Text>
+              <Text style={tc.tapHint}>Toque para solicitar troca →</Text>
+            </View>
+          )}
+
+          {/* Linha de alocação — ferramenta que está com o próprio usuário */}
+          {isInUse && isMinhaFerramenta && (
+            <View style={tc.allocRow}>
+              <UserIcon size={11} color={D.orange} />
+              <Text style={[tc.allocText, { color: D.orange }]}>Com você</Text>
+              <View style={[tc.readOnlyBadge, { backgroundColor: 'rgba(240,90,0,0.08)', borderColor: 'rgba(240,90,0,0.2)' }]}>
+                <Text style={[tc.readOnlyText, { color: D.orange }]}>não transferível</Text>
+              </View>
             </View>
           )}
 
@@ -734,6 +781,10 @@ export default function FerramentasScreen() {
   const { naoLidas, startPolling, stopPolling } = useNotificacoes();
   const canTransfer = user?.role === 'colaborador';
 
+  // Crachá reativo: ao trocar de login, a lista é limpa e recarregada
+  // automaticamente, sem depender de quando AsyncStorage.getItem é chamado.
+  const crachaAtivo = (user as any)?.cracha ?? (user as any)?.matricula ?? (user as any)?.id ?? null;
+
   const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string>('Todos');
@@ -747,6 +798,17 @@ export default function FerramentasScreen() {
 
   // Polling de troca recebida — válido para colaborador (almoxarife não recebe P2P)
   const { trocaRecebida, modalVisible: recebidaVisible, fechar: fecharRecebida } = useTrocaRecebidaListener();
+
+  // Listener de solicitações de troca P2P pendentes para mim (novo fluxo)
+  const {
+    solicitacaoTroca,
+    modalVisible: solicitacaoModalVisible,
+    aceitando,
+    recusando,
+    aceitar: aceitarTroca,
+    recusar: recusarTroca,
+    fechar: fecharSolicitacao,
+  } = useTrocaSolicitacaoListener();
 
   const headerAnim = useRef(new Animated.Value(0)).current;
   const statAnim1 = useRef(new Animated.Value(0)).current;
@@ -762,19 +824,25 @@ export default function FerramentasScreen() {
         Animated.spring(statAnim3, { toValue: 1, tension: 120, friction: 10, useNativeDriver: true }),
       ]),
     ]).start();
-    load();
     startPolling();
-    
-    return () => {
-      stopPolling();
-    };
+    return () => { stopPolling(); };
   }, [startPolling, stopPolling]);
+
+  // Ao trocar de crachá, limpa a lista imediatamente e recarrega
+  // com o usuário correto — impede que ferramentas de outro crachá apareçam.
+  useEffect(() => {
+    setFerramentas([]);
+    setQuery('');
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crachaAtivo]);
 
   const load = async () => {
     try {
       setLoading(true);
-      const cracha = await AsyncStorage.getItem('userCracha');
-      const data = cracha ? await apiClient.listarMinhasFerramentas(cracha) : [];
+      // Lista todas as ferramentas — cada colaborador vê o inventário completo.
+      // A lógica de "pode transferir ou não" é resolvida por isMinhaFerramenta no card.
+      const data = await apiClient.listarFerramentas();
       setFerramentas(data || []);
     } catch (e: any) {
       Alert.alert('Erro', e.message);
@@ -804,8 +872,9 @@ export default function FerramentasScreen() {
   };
 
   const handleCardPress = (t: Ferramenta) => {
-    // Guard: só colaborador pode abrir modal de troca
     if (!canTransfer) return;
+    // Bloqueia troca da própria ferramenta
+    if (crachaAtivo && t.alocadoPara && String(t.alocadoPara) === String(crachaAtivo)) return;
     setSelected(t);
     setModalVisible(true);
   };
@@ -828,7 +897,7 @@ export default function FerramentasScreen() {
             <View>
               <Text style={s.headerTitle}>Ferramentas</Text>
               <Text style={s.headerSub}>
-                {counts.Todos} itens · {canTransfer ? 'toque em "Em uso" para transferir' : 'visão gerencial'}
+                {counts.Todos} itens · {canTransfer ? 'toque em "Em uso" para solicitar troca' : 'visão gerencial'}
               </Text>
             </View>
             <View style={s.headerActions}>
@@ -890,6 +959,11 @@ export default function FerramentasScreen() {
                 index={index}
                 onPress={handleCardPress}
                 canTransfer={canTransfer}
+                isMinhaFerramenta={
+                  !!crachaAtivo &&
+                  item.status === 'Em uso' &&
+                  String(item.alocadoPara) === String(crachaAtivo)
+                }
               />
             )}
             contentContainerStyle={s.listContent}
@@ -910,6 +984,7 @@ export default function FerramentasScreen() {
         <SwapModal
           visible={modalVisible}
           tool={selected}
+          meuCracha={crachaAtivo}
           onClose={() => { setModalVisible(false); setTimeout(() => setSelected(null), 400); }}
           onSuccess={(ferramenta, paraNome) => {
             setTrocaEnviada({ ferramenta, paraNome });
@@ -938,6 +1013,19 @@ export default function FerramentasScreen() {
           outroNome={trocaRecebida?.deNome ?? ''}
           tipo="recebeu"
           onClose={fecharRecebida}
+        />
+      )}
+
+      {/* Modal de solicitação de troca P2P — aparece para o destinatário aceitar/recusar */}
+      {canTransfer && (
+        <TrocaSolicitacaoModal
+          visible={solicitacaoModalVisible}
+          solicitacao={solicitacaoTroca}
+          aceitando={aceitando}
+          recusando={recusando}
+          onAceitar={() => { aceitarTroca().then(load); }}
+          onRecusar={recusarTroca}
+          onFechar={fecharSolicitacao}
         />
       )}
 

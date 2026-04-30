@@ -407,6 +407,46 @@ async confirmarVisualizacaoTroca(cracha: string): Promise<void> {
     await this.api.post('/trocas/recebidas/visualizar', { cracha });
   } catch {}
 }
+
+// ── Troca P2P com aceite do destinatário ─────────────────────────────────
+
+async solicitarTrocaP2P(request: {
+  de_cracha: string;
+  para_cracha: string;
+  ferramentas: Array<{ codigo: string; qtd: number }>;
+}): Promise<{ id: number }> {
+  try {
+    const response = await this.api.post('/trocas/solicitar', request);
+    return response.data;
+  } catch (error) {
+    throw new Error(this.extractErrorMessage(error));
+  }
+}
+
+async listarTrocasSolicitadasParaMim(para_cracha: string): Promise<any[]> {
+  try {
+    const response = await this.api.get(`/trocas/pendentes?para_cracha=${encodeURIComponent(para_cracha)}`);
+    return response.data ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async aceitarTrocaSolicitada(id: number, para_cracha: string): Promise<void> {
+  try {
+    await this.api.post(`/trocas/${id}/aceitar`, { para_cracha });
+  } catch (error) {
+    throw new Error(this.extractErrorMessage(error));
+  }
+}
+
+async recusarTrocaSolicitada(id: number): Promise<void> {
+  try {
+    await this.api.post(`/trocas/${id}/recusar`);
+  } catch (error) {
+    throw new Error(this.extractErrorMessage(error));
+  }
+}
   /**
    * Verificar se está autenticado
    */
